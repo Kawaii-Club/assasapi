@@ -1,7 +1,6 @@
 import express from "express";
 import cors from "cors";
 import paymentsRoutes from "./routes/payment.routes.js";
-
 const app = express();
 
 app.use(cors());
