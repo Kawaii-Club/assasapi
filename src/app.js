@@ -9,22 +9,10 @@ import { sendPushNotification } from "./services/notification.service.js"; // âœ
 
 const app = express();
 
-const allowedOrigins = [
-  "https://loquacious-panda-f32bc4.netlify.app",
-  "http://localhost:3000", // opcional para testes
-];
-
 app.use(cors({
-  origin: function(origin, callback) {
-    if (!origin) return callback(null, true); // requests sem origin (Postman / mobile)
-    if (allowedOrigins.indexOf(origin) === -1) {
-      return callback(new Error(`CORS bloqueado para: ${origin}`), false);
-    }
-    return callback(null, true);
-  },
+  origin: '*',
   methods: ['GET', 'POST'],
   allowedHeaders: ['Content-Type', 'Authorization'],
-  credentials: true,
 }));
 
 
