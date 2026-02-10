@@ -6,18 +6,34 @@ import paymentsRoutes from "./routes/payment.routes.js";
 import connectionRoutes from "./routes/connection.routes.js";
 import notificationRoutes from "./routes/notification.routes.js";
 import { sendPushNotification } from "./services/notification.service.js"; // ✅ IMPORT ADICIONADO
+
 const app = express();
 
+const allowedOrigins = [
+  "https://loquacious-panda-f32bc4.netlify.app",
+  "http://localhost:3000", // opcional para testes
+];
+
 app.use(cors({
-  origin: '*',
+  origin: function(origin, callback) {
+    if (!origin) return callback(null, true); // requests sem origin (Postman / mobile)
+    if (allowedOrigins.indexOf(origin) === -1) {
+      return callback(new Error(`CORS bloqueado para: ${origin}`), false);
+    }
+    return callback(null, true);
+  },
   methods: ['GET', 'POST'],
   allowedHeaders: ['Content-Type', 'Authorization'],
+  credentials: true,
 }));
+
+
 app.use(express.json());
 
 app.get("/health", (_, res) => {
   res.json({ status: "ok" });
 });
+app.use("/api", paymentsRoutes);
 
 // 🤝 CONEXÕES
 app.use("/api/connections", connectionRoutes);
@@ -29,7 +45,6 @@ app.use("/api/debug", debugRoutes);
 app.use("/api/notifications", notificationRoutes);
 
 // 💳 PAGAMENTOS
-app.use("/api/payments", paymentsRoutes);
 
 // ⚡ ROTA DE TESTE DE NOTIFICAÇÃO
 app.post("/test-notification", async (req, res) => {
@@ -53,4 +68,4 @@ app.post("/test-notification", async (req, res) => {
 });
 
 
-export default app; // ✅ exporta app
+export default app; 

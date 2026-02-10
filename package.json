@@ -4,7 +4,7 @@
   "description": "API Kawaii - Asaas",
   "type": "module",
   "scripts": {
-    "dev": "nodemon src/server.js",
+    "dev": "nodemon --env-file=.env src/server.js",
     "start": "node src/server.js"
   },
   "keywords": [],
@@ -12,8 +12,8 @@
   "license": "ISC",
   "dependencies": {
     "axios": "^1.13.2",
-    "cors": "^2.8.5",
-    "dotenv": "^17.2.3",
+    "cors": "^2.8.6",
+    "dotenv": "^17.2.4",
     "express": "^5.2.1",
     "firebase-admin": "^13.6.0"
   },

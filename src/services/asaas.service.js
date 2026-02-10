@@ -1,65 +1,29 @@
-import { asaas } from "../config/asaas.js";
-
-/* ============================
-   CUSTOMER
-============================ */
-export async function createCustomer({ name, email, cpfCnpj }) {
-  const { data } = await asaas.post("/customers", {
-    name,
-    email,
-    cpfCnpj,
-  });
-  return data.id;
+import { getAsaasClient } from "../config/asaas.js";
+export async function createSubscription(data) {
+  const asaas = getAsaasClient(); 
+  const response = await asaas.post("/subscriptions", data);
+  return response.data;
+}
+export async function createCustomer(data) {
+  const asaas = getAsaasClient();
+  const response = await asaas.post("/customers", data);
+  return response.data;
 }
 
-/* ============================
-   CREATE PAYMENT
-============================ */
-export async function createPayment({
-  billingType,
-  customerId,
-  description,
-  value,
-}) {
-  const payload = {
-    billingType,
-    customer: customerId,
-    description,
-    value: Number(value.toFixed(2)),
-    dueDate: new Date(Date.now() + 86400000)
-      .toISOString()
-      .split("T")[0],
-  };
-
-  const { data } = await asaas.post("/payments", payload);
-  return data;
+export async function getSubscription(subscriptionId) {
+  const asaas = getAsaasClient();
+  const response = await asaas.get(`/subscriptions/${subscriptionId}`);
+  return response.data;
 }
 
-/* ============================
-   CREDIT CARD
-============================ */
-export async function payWithCreditCard(paymentId, cardData) {
-  const { data } = await asaas.post(
-    `/payments/${paymentId}/payWithCreditCard`,
-    cardData
-  );
-  return data;
+export async function cancelSubscription(subscriptionId) {
+  const asaas = getAsaasClient();
+  const response = await asaas.delete(`/subscriptions/${subscriptionId}`);
+  return response.data;
 }
 
-/* ============================
-   GET PAYMENT
-============================ */
-export async function getPayment(paymentId) {
-  const { data } = await asaas.get(`/payments/${paymentId}`);
-  return data;
-}
-/* ============================
-   PIX QR CODE
-============================ */
-export async function getPixQrCode(paymentId) {
-  const { data } = await asaas.get(
-    `/payments/${paymentId}/pixQrCode`
-  );
-
-  return data;
+export async function getSubscriptionPayments(subscriptionId) {
+  const asaas = getAsaasClient();
+  const response = await asaas.get(`/subscriptions/${subscriptionId}/payments`);
+  return response.data; 
 }

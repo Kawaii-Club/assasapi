@@ -1,0 +1,2 @@
+set FIREBASE_DEPLOY_TIMEOUT=30000    
+firebase deploy --only functions:sendNotification --debug 
