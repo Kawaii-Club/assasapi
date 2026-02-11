@@ -12,3 +12,4 @@ yarn-error.log
 # Logs
 logs/
 *.log
+application_default_credentials.json
