@@ -6,18 +6,25 @@ import path from "path";
 if (!admin.apps.length) {
   const tmpFile = path.join(os.tmpdir(), "firebase-service-account.json");
 
-  // grava o JSON no arquivo temporário
   fs.writeFileSync(
     tmpFile,
     process.env.FIREBASE_SERVICE_ACCOUNT_JSON,
     { encoding: "utf-8" }
   );
 
-  // 🔥 lê e converte em objeto
+
   const serviceAccount = JSON.parse(
     fs.readFileSync(tmpFile, "utf-8")
   );
-
+  config = {
+    method: "post",
+    url: `https://fcm.googleapis.com/v1/projects/${FIREBASE_PROJECT_ID}/messages:send`,
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: "Bearer " + jwttoken,
+    },
+    data,
+  };
   admin.initializeApp({
     credential: admin.credential.cert(serviceAccount),
   });

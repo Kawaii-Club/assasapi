@@ -1,7 +1,7 @@
 import axios from "axios";
 import dotenv from "dotenv";
 
-dotenv.config(); // garante que o .env seja carregado
+dotenv.config(); 
 
 const ASAAS_URL = process.env.ASAAS_API_URL;
 const ASAAS_KEY = process.env.ASAAS_API_KEY;

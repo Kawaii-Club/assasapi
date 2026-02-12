@@ -153,22 +153,18 @@ export async function createSubscriptionController(req, res) {
       planId,
       value,
       cycle,
-      billingType, // PIX | CREDIT_CARD | CREDIT_CARD_EXTERNAL
+      billingType, 
       creditCard,
       creditCardHolderInfo,
       remoteIp,
     } = req.body;
 
-    // =========================
-    // 1️⃣ Validação
-    // =========================
+   
     if (!userId || !planId || value == null || !cycle || !billingType) {
       return res.status(400).json({ error: "Campos obrigatórios faltando" });
     }
 
-    // =========================
-    // 2️⃣ Usuário
-    // =========================
+  
     const user = await getUser(userId);
     if (!user) {
       return res.status(404).json({ error: "Usuário não encontrado" });
@@ -176,9 +172,7 @@ export async function createSubscriptionController(req, res) {
 
     let customerId = user.customerId;
 
-    // =========================
-    // 3️⃣ Customer
-    // =========================
+  
     if (!customerId) {
       const name = user.name || creditCardHolderInfo?.name;
       const cpfCnpj = user.cpf || creditCardHolderInfo?.cpfCnpj;
@@ -201,9 +195,7 @@ export async function createSubscriptionController(req, res) {
       await updateUser(userId, { customerId });
     }
 
-    // =====================================================
-    // 🔥 CARTÃO EXTERNO (CHECKOUT ASAAS)
-    // =====================================================
+ 
     if (billingType === "CREDIT_CARD_EXTERNAL") {
       const paymentLink = await createExternalCardSubscription({
         customerId,
@@ -221,14 +213,11 @@ export async function createSubscriptionController(req, res) {
 
       return res.status(201).json({
         success: true,
-        checkoutUrl: paymentLink.url, // 🔗 ABRE NO FLUTTER
+        checkoutUrl: paymentLink.url, 
         customerId,
       });
     }
 
-    // =====================================================
-    // PIX ou CARTÃO INTERNO
-    // =====================================================
     const nextDueDate =
       cycle === "YEARLY" ? todayPlus(365) : todayPlus(30);
 

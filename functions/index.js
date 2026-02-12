@@ -10,9 +10,7 @@ import {
 import { todayPlus } from "./src/utils/date.js";
 import { ASAAS_KEY, ASAAS_URL, getAsaasClient } from './src/config/asaas.js';
 
-// ---------- Send Notification (Corrigida para v2) ----------
 export const sendNotification = onCall(async (request) => {
-  // Na v2, os dados ficam em request.data
   const { token, title, body, payload } = request.data;
 
   try {
@@ -33,20 +31,18 @@ export const sendNotification = onCall(async (request) => {
     return { success: true, messageId: response };
   } catch (error) {
     console.error("ERRO FINAL NOTIFICAÇÃO:", error);
-    // Se já for HttpsError, repassa. Se não, cria um novo.
     if (error instanceof HttpsError) throw error;
     throw new HttpsError("internal", error.message);
   }
 });
 
-// ---------- Create Subscription (Versão onCall v2) ----------
 export const createSubscription = onCall(
   {
     secrets: [ASAAS_KEY, ASAAS_URL],
     timeoutSeconds: 120,
   },
   async (request) => {
-    // Validação de autenticação automática do Firebase
+
     if (!request.auth) {
       throw new HttpsError(
         "unauthenticated", 
@@ -69,18 +65,15 @@ export const createSubscription = onCall(
         remoteIp,
       } = request.data;
 
-      // 1️⃣ Validação de campos
       if (!userId || !planId || value == null || !cycle || !billingType) {
         throw new HttpsError("invalid-argument", "Dados obrigatórios faltando.");
       }
 
-      // 2️⃣ Buscar usuário
       const user = await getUser(userId);
       if (!user) {
         throw new HttpsError("not-found", "Usuário não encontrado.");
       }
 
-      // 3️⃣ Criar customer se necessário
       if (!user.customerId) {
         const customer = await createCustomer({
           name: user.name,
@@ -95,7 +88,6 @@ export const createSubscription = onCall(
         user.customerId = customer.id;
       }
 
-      // 4️⃣ Preparar Assinatura
       const nextDueDate = cycle === "YEARLY" ? todayPlus(365) : todayPlus(30);
       const payload = {
         customer: user.customerId,
@@ -116,7 +108,7 @@ export const createSubscription = onCall(
         payload.remoteIp = remoteIp;
       }
 
-      // 5️⃣ Asaas
+   
       const subscription = await createAsaasSubscription({ 
         ...payload, 
         asaasKey: currentKey, 

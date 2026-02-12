@@ -23,18 +23,16 @@ app.get("/health", (_, res) => {
 });
 app.use("/api", paymentsRoutes);
 
-// 🤝 CONEXÕES
+
 app.use("/api/connections", connectionRoutes);
 
-// 🔔 DEBUG
+
 app.use("/api/debug", debugRoutes);
 
-// 🔔 NOTIFICAÇÕES
+
 app.use("/api/notifications", notificationRoutes);
 
-// 💳 PAGAMENTOS
 
-// ⚡ ROTA DE TESTE DE NOTIFICAÇÃO
 app.post("/test-notification", async (req, res) => {
   try {
     const { fcmToken } = req.body;

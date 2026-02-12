@@ -19,9 +19,7 @@ export async function createSubscriptionController(req, res) {
       remoteIp,
     } = req.body;
 
-    // =========================
-    // 1️⃣ Campos obrigatórios principais
-    // =========================
+
     const missingFields = [];
     if (!userId) missingFields.push("userId");
     if (!planId || !planId.trim()) missingFields.push("planId");
@@ -37,9 +35,6 @@ export async function createSubscriptionController(req, res) {
       });
     }
 
-    // =========================
-    // 2️⃣ Buscar usuário
-    // =========================
     const user = await getUser(userId);
     console.log("👤 USER:", user);
 
@@ -47,7 +42,6 @@ export async function createSubscriptionController(req, res) {
       return res.status(404).json({ error: "Usuário não encontrado" });
     }
 
-    // Checa dados obrigatórios do usuário
     const missingUserFields = [];
     if (!user.email) missingUserFields.push("email");
     if (!user.cpf) missingUserFields.push("cpf");
@@ -60,9 +54,7 @@ export async function createSubscriptionController(req, res) {
       });
     }
 
-    // =========================
-    // 3️⃣ Cria customer se não existir
-    // =========================
+ 
     if (!user.customerId) {
       const customer = await createCustomer({
         name: user.name,
@@ -89,9 +81,7 @@ export async function createSubscriptionController(req, res) {
       externalReference: userId,
     };
 
-    // =========================
-    // 4️⃣ Validação do cartão de crédito
-    // =========================
+   
     if (billingType === "CREDIT_CARD") {
       const missingCardFields = [];
 
@@ -120,9 +110,7 @@ export async function createSubscriptionController(req, res) {
       payload.remoteIp = remoteIp;
     }
 
-    // =========================
-    // 5️⃣ Cria assinatura
-    // =========================
+ 
     const subscription = await createSubscription(payload);
     let qrCode = null;
     let pixCode = null;
