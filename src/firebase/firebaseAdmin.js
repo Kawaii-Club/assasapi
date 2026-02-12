@@ -18,15 +18,7 @@ if (!admin.apps.length) {
   );
   console.log("🔑 Service Account JSON carregado do ambiente.",serviceAccount);
   console.log("🔑 Service Account carregado:", serviceAccount.project_id);
-  config = {
-    method: "post",
-    url: `https://fcm.googleapis.com/v1/projects/${serviceAccount.project_id}/messages:send`,
-    headers: {
-      "Content-Type": "application/json",
-      Authorization: "Bearer " + jwttoken,
-    },
-    data,
-  };
+ 
   admin.initializeApp({
     credential: admin.credential.cert(serviceAccount),
   });
