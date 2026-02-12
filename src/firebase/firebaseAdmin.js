@@ -16,9 +16,11 @@ if (!admin.apps.length) {
   const serviceAccount = JSON.parse(
     fs.readFileSync(tmpFile, "utf-8")
   );
+  console.log("🔑 Service Account JSON carregado do ambiente.",serviceAccount);
+  console.log("🔑 Service Account carregado:", serviceAccount.project_id);
   config = {
     method: "post",
-    url: `https://fcm.googleapis.com/v1/projects/${FIREBASE_PROJECT_ID}/messages:send`,
+    url: `https://fcm.googleapis.com/v1/projects/${serviceAccount.project_id}/messages:send`,
     headers: {
       "Content-Type": "application/json",
       Authorization: "Bearer " + jwttoken,
