@@ -136,6 +136,26 @@ export async function createSubscriptionController(req, res) {
       }
 
       console.log("✅ SUBSCRIPTION:", subscription.id);
+      // ================= SALVAR ORDER =================
+try {
+  await db.collection("orders").add({
+    userId,
+    customerId: user.customerId,
+    planId,
+    subscriptionId: subscription.id, // AGORA NÃO É NULL
+    value,
+    cycle,
+    billingType,
+    checkoutUrl,
+    pixCode,
+    status: "pending",
+    createdAt: new Date(),
+  });
+
+  console.log("🧾 ORDER SALVO COM SUBSCRIPTION");
+} catch (err) {
+  console.error("⚠️ ERRO AO SALVAR ORDER:", err);
+}
     } catch (err) {
       console.error("❌ ERRO AO CRIAR SUBSCRIPTION:", err.response?.data || err);
 
