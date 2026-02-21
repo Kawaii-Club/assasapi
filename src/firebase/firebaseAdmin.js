@@ -8,7 +8,7 @@ if (!admin.apps.length) {
 
   fs.writeFileSync(
     tmpFile,
-    process.env.FIREBASE_SERVICE_ACCOUNT_JSON,
+    process.env.FIREBASE_SERVICE_ACCOUNT,
     { encoding: "utf-8" }
   );
 

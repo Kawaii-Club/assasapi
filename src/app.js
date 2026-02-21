@@ -6,6 +6,7 @@ import paymentsRoutes from "./routes/payment.routes.js";
 import connectionRoutes from "./routes/connection.routes.js";
 import notificationRoutes from "./routes/notification.routes.js";
 import { sendPushNotification } from "./services/notification.service.js"; // ✅ IMPORT ADICIONADO
+import { asaasWebhook } from "./controllers/asaas.controller.js";
 
 const app = express();
 
@@ -25,7 +26,7 @@ app.use("/api", paymentsRoutes);
 
 
 app.use("/api/connections", connectionRoutes);
-
+app.post("/api/webhook/asaas", asaasWebhook);
 
 app.use("/api/debug", debugRoutes);
 

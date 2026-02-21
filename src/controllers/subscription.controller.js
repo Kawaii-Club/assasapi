@@ -8,143 +8,201 @@ import { todayPlus } from "../utils/date.js";
 
 export async function createSubscriptionController(req, res) {
   try {
-    const {
-      userId,
-      planId,
-      value,
-      cycle,       
-      billingType,  
-      creditCard,
-      creditCardHolderInfo,
-      remoteIp,
-    } = req.body;
+    const { userId, planId, value, cycle, billingType } = req.body;
 
-
+    // ================= VALIDAR REQUEST =================
     const missingFields = [];
+
     if (!userId) missingFields.push("userId");
-    if (!planId || !planId.trim()) missingFields.push("planId");
-    if (value == null) missingFields.push("value");
+    if (!planId) missingFields.push("planId");
+    if (value === undefined || value === null) missingFields.push("value");
     if (!cycle) missingFields.push("cycle");
     if (!billingType) missingFields.push("billingType");
 
     if (missingFields.length > 0) {
-      console.log("❌ Campos obrigatórios faltando no request:", missingFields);
       return res.status(400).json({
+        success: false,
         error: "Campos obrigatórios faltando",
         missingFields,
       });
     }
 
-    const user = await getUser(userId);
-    console.log("👤 USER:", user);
+    if (typeof value !== "number" || value <= 0) {
+      return res.status(400).json({
+        success: false,
+        error: "Valor inválido",
+      });
+    }
+
+    if (!["MONTHLY", "YEARLY"].includes(cycle)) {
+      return res.status(400).json({
+        success: false,
+        error: "Ciclo inválido",
+      });
+    }
+
+    if (!["PIX", "BOLETO", "CREDIT_CARD"].includes(billingType)) {
+      return res.status(400).json({
+        success: false,
+        error: "Tipo de pagamento inválido",
+      });
+    }
+
+    // ================= BUSCAR USUÁRIO =================
+    let user;
+
+    try {
+      user = await getUser(userId);
+    } catch (err) {
+      console.error("❌ ERRO AO BUSCAR USER:", err);
+      return res.status(500).json({
+        success: false,
+        error: "Erro ao buscar usuário",
+      });
+    }
 
     if (!user) {
-      return res.status(404).json({ error: "Usuário não encontrado" });
+      return res.status(404).json({
+        success: false,
+        error: "Usuário não encontrado",
+      });
     }
 
-    const missingUserFields = [];
-    if (!user.email) missingUserFields.push("email");
-    if (!user.cpf) missingUserFields.push("cpf");
-
-    if (missingUserFields.length > 0) {
-      console.log("❌ Dados obrigatórios do usuário faltando:", missingUserFields);
+    if (!user.email || !user.cpf) {
       return res.status(400).json({
-        error: "Usuário sem dados obrigatórios",
-        missingFields: missingUserFields,
+        success: false,
+        error: "Usuário sem email ou CPF",
       });
     }
 
- 
-    if (!user.customerId) {
-      const customer = await createCustomer({
-        name: user.name,
-        email: user.email,
-        cpfCnpj: user.cpf,
-        phone: user.phone,
-        externalReference: userId,
+    // ================= CHECAR ASSINATURA ATIVA =================
+    if (user.subscriptionId && user.planStatus === "active") {
+      return res.status(400).json({
+        success: false,
+        error: "Usuário já possui assinatura ativa",
       });
-
-      await updateUser(userId, { customerId: customer.id });
-      user.customerId = customer.id;
-      console.log("💳 Novo customer criado:", customer.id);
     }
 
-    const nextDueDate = cycle === "YEARLY" ? todayPlus(365) : todayPlus(30);
-
-    const payload = {
-      customer: user.customerId,
-      billingType,
-      value,
-      cycle,
-      nextDueDate,
-      description: `Plano ${planId}`,
-      externalReference: userId,
-    };
-
-   
-    if (billingType === "CREDIT_CARD") {
-      const missingCardFields = [];
-
-      const requiredCard = ["number", "holderName", "expiryMonth", "expiryYear", "ccv"];
-      requiredCard.forEach(f => {
-        if (!creditCard?.[f]) missingCardFields.push(`creditCard.${f}`);
-      });
-
-      const requiredHolder = ["name", "email", "cpfCnpj", "postalCode", "addressNumber", "phone"];
-      requiredHolder.forEach(f => {
-        if (!creditCardHolderInfo?.[f]) missingCardFields.push(`creditCardHolderInfo.${f}`);
-      });
-
-      if (!remoteIp) missingCardFields.push("remoteIp");
-
-      if (missingCardFields.length > 0) {
-        console.log("❌ Campos de cartão de crédito faltando:", missingCardFields);
-        return res.status(400).json({
-          error: "Dados do cartão ou IP ausentes",
-          missingFields: missingCardFields,
+    // ================= CRIAR CUSTOMER SE NÃO EXISTIR =================
+    try {
+      if (!user.customerId) {
+        const customer = await createCustomer({
+          name: user.name,
+          email: user.email,
+          cpfCnpj: user.cpf,
+          phone: user.phone,
+          externalReference: userId,
         });
+
+        if (!customer?.id) {
+          throw new Error("Asaas não retornou customerId");
+        }
+
+        await updateUser(userId, { customerId: customer.id });
+        user.customerId = customer.id;
+
+        console.log("💳 Novo customer criado:", customer.id);
+      }
+    } catch (err) {
+      console.error("❌ ERRO AO CRIAR CUSTOMER:", err.response?.data || err);
+
+      return res.status(500).json({
+        success: false,
+        error: "Erro ao criar cliente no Asaas",
+      });
+    }
+
+    // ================= CRIAR ASSINATURA =================
+    let subscription;
+
+    try {
+      const nextDueDate =
+        cycle === "YEARLY" ? todayPlus(365) : todayPlus(30);
+
+      const payload = {
+        customer: user.customerId,
+        billingType,
+        value,
+        cycle,
+        nextDueDate,
+        description: `Plano ${planId}`,
+        externalReference: userId,
+      };
+
+      subscription = await createSubscription(payload);
+
+      if (!subscription?.id) {
+        throw new Error("Asaas não retornou subscriptionId");
       }
 
-      payload.creditCard = creditCard;
-      payload.creditCardHolderInfo = creditCardHolderInfo;
-      payload.remoteIp = remoteIp;
+      console.log("✅ SUBSCRIPTION:", subscription.id);
+    } catch (err) {
+      console.error("❌ ERRO AO CRIAR SUBSCRIPTION:", err.response?.data || err);
+
+      return res.status(500).json({
+        success: false,
+        error: "Erro ao criar assinatura no Asaas",
+      });
     }
 
- 
-    const subscription = await createSubscription(payload);
-    let qrCode = null;
-    let pixCode = null;
+    // ================= PEGAR LINK DE PAGAMENTO =================
+  // ================= PEGAR LINK DE PAGAMENTO =================
+let checkoutUrl = null;
+let pixCode = null;
 
-    if (billingType === "PIX") {
-      const payments = await getSubscriptionPayments(subscription.id);
-      console.log("💳 Pagamentos da assinatura:", payments);
+try {
+  // ⚠️ ASAAS demora alguns ms para gerar payment
+  await new Promise(resolve => setTimeout(resolve, 1500));
 
-      const pixPayment = payments.data.find(p => p.billingType === "PIX");
-      console.log("💳 Pagamento PIX encontrado:", pixPayment);
+  const payments = await getSubscriptionPayments(subscription.id);
 
-      qrCode = pixPayment?.invoiceUrl || null;
-      pixCode = `Link de pagamento: ${pixPayment?.invoiceUrl}`;
-      console.log("💳 QR Code:", qrCode);
-      console.log("💳 Código PIX:", pixCode);
-      await updateUser(userId, { pixQrCode: qrCode });
+  console.log("💰 PAYMENTS:", payments?.data);
+
+  if (payments?.data?.length > 0) {
+    const payment = payments.data[0];
+
+    checkoutUrl = payment?.invoiceUrl || null;
+    pixCode = payment?.pixQrCode || null;
+  }
+
+  // fallback seguro
+  if (!checkoutUrl) {
+    console.warn("⚠️ Nenhum invoiceUrl encontrado");
+  }
+
+} catch (err) {
+  console.error("⚠️ ERRO AO BUSCAR PAYMENT:", err.response?.data || err);
+}
+
+    // ================= ATUALIZA USER =================
+    try {
+      await updateUser(userId, {
+        subscriptionId: subscription.id,
+        subscriptionCreatedAt: new Date(),
+        planId,
+        planStatus: "pending",
+      });
+    } catch (err) {
+      console.error("⚠️ ERRO AO ATUALIZAR USER:", err);
+      // não quebra — assinatura já existe
     }
 
-    await updateUser(userId, {
-      subscriptionId: subscription.id,
-      planId,
-      planStatus: billingType === "PIX" ? "pending" : "active",
-    });
-
+    // ================= RESPONSE =================
     return res.json({
       success: true,
-      subscription,
-      qrCode,
+      subscriptionId: subscription.id,
+      customerId: user.customerId,
+      planId,
+      status: "pending",
+      checkoutUrl,
       pixCode,
     });
   } catch (err) {
-    console.error("❌ CREATE SUBSCRIPTION:", err.response?.data || err.message);
+    console.error("💥 ERRO FATAL:", err.response?.data || err.message);
+
     return res.status(500).json({
-      error: "Erro ao criar assinatura",
+      success: false,
+      error: "Erro interno inesperado",
     });
   }
 }
