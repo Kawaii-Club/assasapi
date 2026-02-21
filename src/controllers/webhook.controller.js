@@ -22,6 +22,7 @@ export async function asaasWebhook(req, res) {
 
     // busca usuário
     const user = await getUserByCustomerId(customerId);
+    
 
     if (!user) return res.status(200).json({ ignored: true });
 
