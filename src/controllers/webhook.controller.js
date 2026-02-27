@@ -5,13 +5,59 @@ const db = admin.firestore();
 
 export async function asaasWebhook(req, res) {
   try {
+    // ==============================
+    // 1️⃣ Validação de segurança
+    // ==============================
     if (req.headers["asaas-access-token"] !== process.env.ASAAS_WEBHOOK_TOKEN) {
+      console.log("⛔ Token inválido");
       return res.status(401).json({ error: "Invalid webhook" });
     }
 
-    const { event, payment } = req.body;
+    const { event, payment, subscription } = req.body;
 
-    console.log("🔥 WEBHOOK:", event);
+    console.log("🔥 EVENTO RECEBIDO:", event);
+
+    // ==============================
+    // 2️⃣ TRATAMENTO DE ASSINATURA
+    // ==============================
+
+    if (event?.startsWith("SUBSCRIPTION_")) {
+
+      if (!subscription?.customer) {
+        return res.status(200).json({ ignored: true });
+      }
+
+      const user = await getUserByCustomerId(subscription.customer);
+      if (!user) return res.status(200).json({ ignored: true });
+
+      if (event === "SUBSCRIPTION_CREATED") {
+        await updateUserByCustomerId(subscription.customer, {
+          subscriptionId: subscription.id,
+          planStatus: "pending",
+          subscriptionCreatedAt: new Date(),
+        });
+
+        console.log("🆕 Assinatura criada:", user.id);
+      }
+
+      if (event === "SUBSCRIPTION_UPDATED") {
+        console.log("♻️ Assinatura atualizada:", subscription.id);
+      }
+
+      if (event === "SUBSCRIPTION_DELETED") {
+        await updateUserByCustomerId(subscription.customer, {
+          planStatus: "canceled",
+        });
+
+        console.log("❌ Assinatura cancelada:", user.id);
+      }
+
+      return res.status(200).json({ received: true });
+    }
+
+    // ==============================
+    // 3️⃣ TRATAMENTO DE PAGAMENTOS
+    // ==============================
 
     if (!payment?.customer || !payment?.id) {
       return res.status(200).json({ ignored: true });
@@ -22,6 +68,10 @@ export async function asaasWebhook(req, res) {
     if (!user) return res.status(200).json({ ignored: true });
 
     const orderRef = db.collection("orders").doc(payment.id);
+
+    // 🔥 Previne sobrescrever createdAt
+    const orderSnapshot = await orderRef.get();
+    const isNewOrder = !orderSnapshot.exists;
 
     await orderRef.set({
       userId: user.id,
@@ -36,12 +86,20 @@ export async function asaasWebhook(req, res) {
       pixCode: payment.pixQrCode || null,
       paidAt: payment.paymentDate || null,
       updatedAt: new Date(),
-      createdAt: admin.firestore.FieldValue.serverTimestamp(),
+      ...(isNewOrder && {
+        createdAt: admin.firestore.FieldValue.serverTimestamp(),
+      }),
     }, { merge: true });
 
-    // ============================
-    // CONTROLE DE STATUS
-    // ============================
+    console.log("💾 Pedido salvo/atualizado:", payment.id);
+
+    // ==============================
+    // 4️⃣ CONTROLE DE STATUS DO PLANO
+    // ==============================
+
+    if (event === "PAYMENT_CREATED") {
+      console.log("🧾 Pagamento criado:", payment.id);
+    }
 
     if (event === "PAYMENT_CONFIRMED") {
 
@@ -49,6 +107,7 @@ export async function asaasWebhook(req, res) {
         planStatus: "active",
         subscriptionId: payment.subscription || null,
         subscriptionExpiresAt: new Date(payment.dueDate),
+        lastPaymentAt: new Date(payment.paymentDate),
       });
 
       console.log("✅ Plano ativado:", user.id);
@@ -63,13 +122,13 @@ export async function asaasWebhook(req, res) {
       console.log("⛔ Plano expirado:", user.id);
     }
 
-    if (event === "PAYMENT_DELETED" || event === "SUBSCRIPTION_DELETED") {
+    if (event === "PAYMENT_DELETED") {
 
       await updateUserByCustomerId(customerId, {
         planStatus: "canceled",
       });
 
-      console.log("❌ Plano cancelado:", user.id);
+      console.log("❌ Pagamento deletado:", user.id);
     }
 
     return res.status(200).json({ received: true });
