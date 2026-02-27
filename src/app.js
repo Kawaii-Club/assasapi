@@ -8,6 +8,8 @@ import notificationRoutes from "./routes/notification.routes.js";
 import { sendPushNotification } from "./services/notification.service.js"; // ✅ IMPORT ADICIONADO
 import { asaasWebhook } from "./controllers/webhook.controller.js";
 
+import { authMiddleware } from "./middlewares/auth.middleware.js";
+import { requireActiveSubscription } from "./middlewares/subscription.middleware.js";
 const app = express();
 
 app.use(cors({
@@ -27,7 +29,11 @@ app.use("/api", paymentsRoutes);
 
 app.use("/api/connections", connectionRoutes);
 app.post("/api/webhook/asaas", asaasWebhook);
-
+app.get("/api/connections",
+  authMiddleware,
+  requireActiveSubscription,
+  connectionRoutes
+);
 app.use("/api/debug", debugRoutes);
 
 
