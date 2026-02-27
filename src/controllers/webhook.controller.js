@@ -5,6 +5,7 @@ const db = admin.firestore();
 
 export async function asaasWebhook(req, res) {
   try {
+    console.log("TOKEN DO RENDER:", process.env.ASAAS_WEBHOOK_TOKEN);
     // ==============================
     // 1️⃣ Validação de segurança
     // ==============================
