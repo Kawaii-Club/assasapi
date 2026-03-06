@@ -59,6 +59,26 @@ export async function asaasWebhook(req, res) {
     // ==============================
     // 3️⃣ TRATAMENTO DE PAGAMENTOS
     // ==============================
+    if (event === "PAYMENT_DUE_DATE_WARNING") {
+
+      const user = await getUserByCustomerId(payment.customer);
+      if (!user?.fcmToken) return res.status(200).json({ ignored: true });
+
+      await admin.messaging().send({
+        token: user.fcmToken,
+        notification: {
+          title: "Fatura prestes a vencer",
+          body: `Sua fatura vence em ${payment.dueDate}`,
+        },
+        data: {
+          type: "payment_due",
+          paymentId: payment.id,
+          invoiceUrl: payment.invoiceUrl || "",
+        },
+      });
+
+      console.log("🔔 Notificação de vencimento enviada");
+    }
 
     if (!payment?.customer || !payment?.id) {
       return res.status(200).json({ ignored: true });
@@ -111,6 +131,16 @@ export async function asaasWebhook(req, res) {
         lastPaymentAt: new Date(payment.paymentDate),
       });
 
+      if (user?.fcmToken) {
+        await admin.messaging().send({
+          token: user.fcmToken,
+          notification: {
+            title: "Pagamento confirmado",
+            body: "Seu plano foi ativado com sucesso 🎉",
+          }
+        });
+      }
+
       console.log("✅ Plano ativado:", user.id);
     }
 
@@ -120,9 +150,18 @@ export async function asaasWebhook(req, res) {
         planStatus: "expired",
       });
 
+      if (user?.fcmToken) {
+        await admin.messaging().send({
+          token: user.fcmToken,
+          notification: {
+            title: "Pagamento em atraso",
+            body: "Seu plano foi suspenso por falta de pagamento",
+          }
+        });
+      }
+
       console.log("⛔ Plano expirado:", user.id);
     }
-
     if (event === "PAYMENT_DELETED") {
 
       await updateUserByCustomerId(customerId, {
