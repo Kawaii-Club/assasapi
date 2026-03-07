@@ -184,7 +184,7 @@ export async function asaasWebhook(req, res) {
       console.log("🧾 Pagamento criado:", payment.id);
     }
 
-    if (event === "PAYMENT_CONFIRMED") {
+if (event === "PAYMENT_CONFIRMED" || event === "PAYMENT_RECEIVED") {
 
       await updateUserByCustomerId(customerId, {
         planStatus: "active",
