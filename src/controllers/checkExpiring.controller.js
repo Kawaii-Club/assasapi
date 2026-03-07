@@ -4,59 +4,45 @@ const db = admin.firestore();
 
 export async function checkExpiringSubscriptions(req, res) {
 
+  const { userId } = req.params;
+
+  console.log("👤 verificando usuário:", userId);
   try {
 
-    const now = new Date();
-    const in3Days = new Date();
-    in3Days.setDate(now.getDate() + 3);
+    const { userId } = req.params;
 
-    const nowTimestamp = admin.firestore.Timestamp.fromDate(now);
-    const limitTimestamp = admin.firestore.Timestamp.fromDate(in3Days);
+    const userDoc = await db.collection("users").doc(userId).get();
 
-    console.log("⏱ Agora:", now.toISOString());
-    console.log("📅 Limite (3 dias):", in3Days.toISOString());
-
-    const snapshot = await db
-      .collection("users")
-      .where("planStatus", "==", "active")
-      .where("subscriptionExpiresAt", ">=", nowTimestamp)
-      .where("subscriptionExpiresAt", "<=", limitTimestamp)
-      .get();
-
-    console.log("👥 usuários encontrados:", snapshot.size);
-
-    for (const doc of snapshot.docs) {
-
-      const user = doc.data();
-
-      // segurança extra caso campo não exista
-      if (!user.subscriptionExpiresAt) continue;
-
-      if (!user.fcmToken) continue;
-
-      await admin.messaging().send({
-        token: user.fcmToken,
-        notification: {
-          title: "Seu plano vai expirar em breve ⏳",
-          body: "Renove sua assinatura para não perder seus benefícios.",
-        },
-        data: {
-          type: "subscription_expiring"
-        }
-      });
-
-      console.log("🔔 Notificação enviada:", doc.id);
-
+    if (!userDoc.exists) {
+      return res.status(404).json({ error: "user not found" });
     }
 
+    const user = userDoc.data();
+
+    if (!user.subscriptionExpiresAt) {
+      return res.json({
+        expiringSoon: false,
+        message: "Usuário não tem data de expiração"
+      });
+    }
+
+    const now = new Date();
+    const expires = user.subscriptionExpiresAt.toDate();
+
+    const diffDays = Math.ceil((expires - now) / (1000 * 60 * 60 * 24));
+
+    console.log("👤 usuário:", userId);
+    console.log("📅 expira em:", expires);
+    console.log("⏳ dias restantes:", diffDays);
+
     return res.json({
-      success: true,
-      usersChecked: snapshot.size
+      expiringSoon: diffDays <= 3,
+      daysLeft: diffDays
     });
 
   } catch (err) {
 
-    console.error("❌ erro ao verificar expiração:", err);
+    console.error("❌ erro:", err);
 
     return res.status(500).json({
       error: err.message
