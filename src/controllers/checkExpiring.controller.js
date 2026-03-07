@@ -9,16 +9,28 @@ export async function checkExpiringSubscriptions(req, res) {
     const now = new Date();
     const in3Days = new Date();
     in3Days.setDate(now.getDate() + 3);
-   console.log("⏱ Agora:", now.toISOString());
+
+    const nowTimestamp = admin.firestore.Timestamp.fromDate(now);
+    const limitTimestamp = admin.firestore.Timestamp.fromDate(in3Days);
+
+    console.log("⏱ Agora:", now.toISOString());
     console.log("📅 Limite (3 dias):", in3Days.toISOString());
-    const snapshot = await db.collection("users")
+
+    const snapshot = await db
+      .collection("users")
       .where("planStatus", "==", "active")
-      .where("subscriptionExpiresAt", "<=", in3Days)
+      .where("subscriptionExpiresAt", ">=", nowTimestamp)
+      .where("subscriptionExpiresAt", "<=", limitTimestamp)
       .get();
+
+    console.log("👥 usuários encontrados:", snapshot.size);
 
     for (const doc of snapshot.docs) {
 
       const user = doc.data();
+
+      // segurança extra caso campo não exista
+      if (!user.subscriptionExpiresAt) continue;
 
       if (!user.fcmToken) continue;
 
@@ -33,17 +45,23 @@ export async function checkExpiringSubscriptions(req, res) {
         }
       });
 
-      console.log("🔔 Notificação enviada:", user.id);
+      console.log("🔔 Notificação enviada:", doc.id);
 
     }
 
-    return res.json({ success: true });
+    return res.json({
+      success: true,
+      usersChecked: snapshot.size
+    });
 
   } catch (err) {
 
     console.error("❌ erro ao verificar expiração:", err);
 
-    return res.status(500).json({ error: "internal error" });
+    return res.status(500).json({
+      error: err.message
+    });
+
   }
 
 }
