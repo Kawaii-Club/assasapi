@@ -38,7 +38,7 @@ app.use("/api/debug", debugRoutes);
 
 
 app.use("/api/notifications", notificationRoutes);
-
+app.post("/api/subscriptions/check-expiring", checkExpiringSubscriptions);
 
 app.post("/test-notification", async (req, res) => {
   try {

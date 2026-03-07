@@ -6,10 +6,11 @@ const db = admin.firestore();
 async function downgradeToBasic(customerId) {
   await updateUserByCustomerId(customerId, {
     planId: "nobreza",
+    nextPlanId: null,
     planStatus: "active",
     subscriptionId: null,
-    planExpiresAt: null,
     planStartedAt: null,
+    planExpiresAt: null,
   });
 
   console.log("👑 Usuário voltou para plano Nobreza:", customerId);
@@ -184,12 +185,17 @@ export async function asaasWebhook(req, res) {
       console.log("🧾 Pagamento criado:", payment.id);
     }
 
-if (event === "PAYMENT_CONFIRMED" || event === "PAYMENT_RECEIVED") {
+    if (event === "PAYMENT_CONFIRMED" || event === "PAYMENT_RECEIVED") {
+
+      const newPlan = user?.nextPlanId || user?.planId;
 
       await updateUserByCustomerId(customerId, {
+        planId: newPlan,
+        nextPlanId: null,
         planStatus: "active",
         subscriptionId: payment.subscription || null,
-        subscriptionExpiresAt: new Date(payment.dueDate),
+        planStartedAt: new Date(payment.paymentDate),
+        planExpiresAt: new Date(payment.dueDate),
         lastPaymentAt: new Date(payment.paymentDate),
       });
 
@@ -198,15 +204,17 @@ if (event === "PAYMENT_CONFIRMED" || event === "PAYMENT_RECEIVED") {
           token: user.fcmToken,
           notification: {
             title: "Pagamento confirmado",
-            body: "Seu plano foi ativado com sucesso 🎉",
+            body: `Seu plano ${newPlan} foi ativado com sucesso 🎉`,
           }
         });
       }
 
-      console.log("✅ Plano ativado:", user.id);
+      console.log("✅ Plano atualizado para:", newPlan);
     }
 
-    if (event === "PAYMENT_OVERDUE") {
+    if (event === "PAYMENT_OVERDUE" ||
+      event === "SUBSCRIPTION_DELETED" ||
+      event === "SUBSCRIPTION_INACTIVATED") {
 
       await downgradeToBasic(customerId);
 
