@@ -136,26 +136,6 @@ export async function createSubscriptionController(req, res) {
       }
 
       console.log("✅ SUBSCRIPTION:", subscription.id);
-      // ================= SALVAR ORDER =================
-// try {
-//   await db.collection("orders").add({
-//     userId,
-//     customerId: user.customerId,
-//     planId,
-//     subscriptionId: subscription.id, // AGORA NÃO É NULL
-//     value,
-//     cycle,
-//     billingType,
-//     checkoutUrl,
-//     pixCode,
-//     status: "pending",
-//     createdAt: new Date(),
-//   });
-
-//   console.log("🧾 ORDER SALVO COM SUBSCRIPTION");
-// } catch (err) {
-//   console.error("⚠️ ERRO AO SALVAR ORDER:", err);
-// }
     } catch (err) {
       console.error("❌ ERRO AO CRIAR SUBSCRIPTION:", err.response?.data || err);
 
@@ -166,45 +146,46 @@ export async function createSubscriptionController(req, res) {
     }
 
     // ================= PEGAR LINK DE PAGAMENTO =================
-  // ================= PEGAR LINK DE PAGAMENTO =================
-let checkoutUrl = null;
-let pixCode = null;
+    let checkoutUrl = null;
+    let pixCode = null;
 
-try {
-  // ⚠️ ASAAS demora alguns ms para gerar payment
-  await new Promise(resolve => setTimeout(resolve, 1500));
+    try {
+      await new Promise(resolve => setTimeout(resolve, 1500));
 
-  const payments = await getSubscriptionPayments(subscription.id);
+      const payments = await getSubscriptionPayments(subscription.id);
 
-  console.log("💰 PAYMENTS:", payments?.data);
+      console.log("💰 PAYMENTS:", payments?.data);
 
-  if (payments?.data?.length > 0) {
-    const payment = payments.data[0];
+      if (payments?.data?.length > 0) {
+        const payment = payments.data[0];
 
-    checkoutUrl = payment?.invoiceUrl || null;
-    pixCode = payment?.pixQrCode || null;
-  }
+        checkoutUrl = payment?.invoiceUrl || null;
+        pixCode = payment?.pixQrCode || null;
+      }
 
-  // fallback seguro
-  if (!checkoutUrl) {
-    console.warn("⚠️ Nenhum invoiceUrl encontrado");
-  }
+      if (!checkoutUrl) {
+        console.warn("⚠️ Nenhum invoiceUrl encontrado");
+      }
 
-} catch (err) {
-  console.error("⚠️ ERRO AO BUSCAR PAYMENT:", err.response?.data || err);
-}
+    } catch (err) {
+      console.error("⚠️ ERRO AO BUSCAR PAYMENT:", err.response?.data || err);
+    }
 
-    // ================= ATUALIZA USER =================
+    // ================= ATUALIZA USER (SEM MUDAR PLANO AINDA) =================
     try {
       await updateUser(userId, {
         subscriptionId: subscription.id,
         subscriptionCreatedAt: new Date(),
-        planId,
-        planStatus: "pending",
+
+        // 👇 novo campo
+        nextPlanId: planId,
+
+        // plano atual permanece
+        planStatus: "pending_payment",
       });
+
     } catch (err) {
       console.error("⚠️ ERRO AO ATUALIZAR USER:", err);
-      // não quebra — assinatura já existe
     }
 
     // ================= RESPONSE =================
@@ -213,11 +194,13 @@ try {
       subscriptionId: subscription.id,
       customerId: user.customerId,
       planId,
-      status: "pending",
+      status: "pending_payment",
       checkoutUrl,
       pixCode,
     });
+
   } catch (err) {
+
     console.error("💥 ERRO FATAL:", err.response?.data || err.message);
 
     return res.status(500).json({
