@@ -3,12 +3,27 @@ import admin from "firebase-admin";
 
 const db = admin.firestore();
 
+async function downgradeToBasic(customerId) {
+  await updateUserByCustomerId(customerId, {
+    planId: "nobreza",
+    planStatus: "active",
+    subscriptionId: null,
+    planExpiresAt: null,
+    planStartedAt: null,
+  });
+
+  console.log("👑 Usuário voltou para plano Nobreza:", customerId);
+}
+
 export async function asaasWebhook(req, res) {
   try {
+
     console.log("TOKEN DO RENDER:", process.env.ASAAS_WEBHOOK_TOKEN);
+
     // ==============================
     // 1️⃣ Validação de segurança
     // ==============================
+
     if (req.headers["asaas-access-token"] !== process.env.ASAAS_WEBHOOK_TOKEN) {
       console.log("⛔ Token inválido");
       return res.status(401).json({ error: "Invalid webhook" });
@@ -31,7 +46,23 @@ export async function asaasWebhook(req, res) {
       const user = await getUserByCustomerId(subscription.customer);
       if (!user) return res.status(200).json({ ignored: true });
 
+      const subscriptionRef = db.collection("subscriptions").doc(subscription.id);
+
+      await subscriptionRef.set({
+        userId: user.id,
+        customerId: subscription.customer,
+        subscriptionId: subscription.id,
+        status: subscription.status || null,
+        value: subscription.value || null,
+        billingType: subscription.billingType || null,
+        cycle: subscription.cycle || null,
+        nextDueDate: subscription.nextDueDate || null,
+        description: subscription.description || null,
+        updatedAt: new Date(),
+      }, { merge: true });
+
       if (event === "SUBSCRIPTION_CREATED") {
+
         await updateUserByCustomerId(subscription.customer, {
           subscriptionId: subscription.id,
           planStatus: "pending",
@@ -46,9 +77,8 @@ export async function asaasWebhook(req, res) {
       }
 
       if (event === "SUBSCRIPTION_DELETED") {
-        await updateUserByCustomerId(subscription.customer, {
-          planStatus: "canceled",
-        });
+
+        await downgradeToBasic(subscription.customer);
 
         console.log("❌ Assinatura cancelada:", user.id);
       }
@@ -59,9 +89,22 @@ export async function asaasWebhook(req, res) {
     // ==============================
     // 3️⃣ TRATAMENTO DE PAGAMENTOS
     // ==============================
+
+    if (!payment?.customer || !payment?.id) {
+      return res.status(200).json({ ignored: true });
+    }
+
+    const customerId = payment.customer;
+    const user = await getUserByCustomerId(customerId);
+
+    if (!user) return res.status(200).json({ ignored: true });
+
+    // ==============================
+    // ALERTA DE VENCIMENTO
+    // ==============================
+
     if (event === "PAYMENT_DUE_DATE_WARNING") {
 
-      const user = await getUserByCustomerId(payment.customer);
       if (!user?.fcmToken) return res.status(200).json({ ignored: true });
 
       await admin.messaging().send({
@@ -80,17 +123,12 @@ export async function asaasWebhook(req, res) {
       console.log("🔔 Notificação de vencimento enviada");
     }
 
-    if (!payment?.customer || !payment?.id) {
-      return res.status(200).json({ ignored: true });
-    }
-
-    const customerId = payment.customer;
-    const user = await getUserByCustomerId(customerId);
-    if (!user) return res.status(200).json({ ignored: true });
+    // ==============================
+    // SALVAR ORDER
+    // ==============================
 
     const orderRef = db.collection("orders").doc(payment.id);
 
-    // 🔥 Previne sobrescrever createdAt
     const orderSnapshot = await orderRef.get();
     const isNewOrder = !orderSnapshot.exists;
 
@@ -115,7 +153,7 @@ export async function asaasWebhook(req, res) {
     console.log("💾 Pedido salvo/atualizado:", payment.id);
 
     // ==============================
-    // 4️⃣ CONTROLE DE STATUS DO PLANO
+    // CONTROLE DE STATUS DO PLANO
     // ==============================
 
     if (event === "PAYMENT_CREATED") {
@@ -146,22 +184,21 @@ export async function asaasWebhook(req, res) {
 
     if (event === "PAYMENT_OVERDUE") {
 
-      await updateUserByCustomerId(customerId, {
-        planStatus: "expired",
-      });
+      await downgradeToBasic(customerId);
 
       if (user?.fcmToken) {
         await admin.messaging().send({
           token: user.fcmToken,
           notification: {
             title: "Pagamento em atraso",
-            body: "Seu plano foi suspenso por falta de pagamento",
+            body: "Seu plano voltou para o plano básico",
           }
         });
       }
 
       console.log("⛔ Plano expirado:", user.id);
     }
+
     if (event === "PAYMENT_DELETED") {
 
       await updateUserByCustomerId(customerId, {
@@ -174,7 +211,9 @@ export async function asaasWebhook(req, res) {
     return res.status(200).json({ received: true });
 
   } catch (err) {
+
     console.error("❌ WEBHOOK ERROR:", err);
+
     return res.status(500).json({ error: "Webhook error" });
   }
 }
