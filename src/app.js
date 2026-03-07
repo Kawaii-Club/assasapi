@@ -7,7 +7,7 @@ import connectionRoutes from "./routes/connection.routes.js";
 import notificationRoutes from "./routes/notification.routes.js";
 import { sendPushNotification } from "./services/notification.service.js"; // ✅ IMPORT ADICIONADO
 import { asaasWebhook } from "./controllers/webhook.controller.js";
-
+import { checkExpiringSubscriptions } from "./controllers/checkExpiring.controller.js";
 import { authMiddleware } from "./middlewares/auth.middleware.js";
 import { requireActiveSubscription } from "./middlewares/subscription.middleware.js";
 const app = express();
