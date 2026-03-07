@@ -34,7 +34,7 @@ export async function asaasWebhook(req, res) {
     console.log("🔥 EVENTO RECEBIDO:", event);
 
     // ==============================
-    // 2️⃣ TRATAMENTO DE ASSINATURA
+    // 2️⃣ EVENTOS DE ASSINATURA
     // ==============================
 
     if (event?.startsWith("SUBSCRIPTION_")) {
@@ -87,7 +87,7 @@ export async function asaasWebhook(req, res) {
     }
 
     // ==============================
-    // 3️⃣ TRATAMENTO DE PAGAMENTOS
+    // 3️⃣ EVENTOS DE PAGAMENTO
     // ==============================
 
     if (!payment?.customer || !payment?.id) {
@@ -95,9 +95,33 @@ export async function asaasWebhook(req, res) {
     }
 
     const customerId = payment.customer;
-    const user = await getUserByCustomerId(customerId);
 
+    const user = await getUserByCustomerId(customerId);
     if (!user) return res.status(200).json({ ignored: true });
+
+    // ==============================
+    // CRIAR SUBSCRIPTION AUTOMÁTICA
+    // (caso webhook de subscription não chegue)
+    // ==============================
+
+    if (payment.subscription) {
+
+      const subscriptionRef = db
+        .collection("subscriptions")
+        .doc(payment.subscription);
+
+      await subscriptionRef.set({
+        userId: user.id,
+        customerId: payment.customer,
+        subscriptionId: payment.subscription,
+        billingType: payment.billingType || null,
+        status: payment.status || "pending",
+        createdAt: admin.firestore.FieldValue.serverTimestamp(),
+        updatedAt: new Date()
+      }, { merge: true });
+
+      console.log("📦 Subscription registrada via payment:", payment.subscription);
+    }
 
     // ==============================
     // ALERTA DE VENCIMENTO
@@ -124,7 +148,7 @@ export async function asaasWebhook(req, res) {
     }
 
     // ==============================
-    // SALVAR ORDER
+    // SALVAR ORDER (PIX / BOLETO / CARTÃO)
     // ==============================
 
     const orderRef = db.collection("orders").doc(payment.id);
