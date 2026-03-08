@@ -38,7 +38,7 @@ export async function checkExpiringSubscriptions(req, res) {
         return res.json({
             expiringSoon: diffDays <= 3,
             daysLeft: diffDays,
-            planId: user.planId || "Gratuito",      // ✅ adiciona plano atual
+            planId: user.planId || "Gratuito",     
             planStatus: user.planStatus || "inactive"
         });
 
