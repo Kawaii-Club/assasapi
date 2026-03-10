@@ -567,3 +567,54 @@ export async function updateSubscription(subscriptionId, payload) {
 
 }
 
+// =========================================================
+// CANCELAR SUBSCRIPTION
+// =========================================================
+
+export async function cancelSubscription(req, res) {
+
+  try {
+
+    const { subscriptionId } = req.body;
+
+    if (!subscriptionId) {
+      return res.status(400).json({
+        success: false,
+        error: "subscriptionId é obrigatório",
+      });
+    }
+
+    console.log("🛑 Cancelando assinatura:", subscriptionId);
+
+    const response = await axios.delete(
+      `https://api.asaas.com/v3/subscriptions/${subscriptionId}`,
+      {
+        headers: {
+          access_token: process.env.ASAAS_API_KEY,
+          "Content-Type": "application/json",
+        },
+      }
+    );
+
+    console.log("✅ Assinatura cancelada no Asaas");
+
+    return res.json({
+      success: true,
+      message: "Assinatura cancelada com sucesso",
+      data: response.data,
+    });
+
+  } catch (err) {
+
+    console.error(
+      "❌ ERRO AO CANCELAR SUBSCRIPTION:",
+      err.response?.data || err
+    );
+
+    return res.status(500).json({
+      success: false,
+      error: "Erro ao cancelar assinatura",
+    });
+
+  }
+}

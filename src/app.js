@@ -27,7 +27,7 @@ app.get("/health", (_, res) => {
 });
 app.use("/api", paymentsRoutes);
 
-router.post("/api/cancel-subscription", cancelSubscription);
+app.post("/api/cancel-subscription", cancelSubscription);
 app.use("/api/connections", connectionRoutes);
 app.post("/api/webhook/asaas", asaasWebhook);
 app.get("/api/connections",
