@@ -9,8 +9,8 @@ export function requireActiveSubscription(req, res, next) {
     return res.status(403).json({ error: "Assinatura inativa" });
   }
 
-  if (user.subscriptionExpiresAt) {
-    const expiresAt = new Date(user.subscriptionExpiresAt);
+  if (user.planExpiresAt) {
+    const expiresAt = new Date(user.planExpiresAt);
     const now = new Date();
 
     if (now > expiresAt) {
