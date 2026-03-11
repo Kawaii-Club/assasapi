@@ -470,22 +470,15 @@ if (event === "PAYMENT_CONFIRMED" ||
 
   // 🔔 PUSH DE PAGAMENTO CONFIRMADO
   if (user?.fcmToken) {
+        await admin.messaging().send({
+          token: user.fcmToken,
+          notification: {
+            title: "Pagamento confirmado",
+            body: `Seu plano ${newPlan} foi ativado com sucesso 🎉`,
+          }
+        });
+      }
 
-    await admin.messaging().send({
-      token: user.fcmToken,
-      notification: {
-        title: "Pagamento confirmado 🎉",
-        body: `Seu plano ${newPlan} foi ativado com sucesso!`,
-      },
-      data: {
-        type: "payment_confirmed",
-        planId: newPlan,
-        paymentId: payment.id,
-      },
-    });
-
-    console.log("🔔 Push de confirmação enviado");
-  }
   console.log("✅ Plano atualizado para:", newPlan);
   console.log("📅 Início:", startedAt);
   console.log("📅 Expira:", expiresAt);
