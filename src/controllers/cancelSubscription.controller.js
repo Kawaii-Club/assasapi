@@ -11,6 +11,8 @@ export async function cancelSubscription(req, res) {
       return res.status(400).json({ error: "subscriptionId é obrigatório" });
     }
 
+    console.log("🛑 Cancelando assinatura:", subscriptionId);
+
     // cancelar no Asaas
     await axios.delete(
       `https://api-sandbox.asaas.com/v3/subscriptions/${subscriptionId}`,
@@ -21,7 +23,7 @@ export async function cancelSubscription(req, res) {
       }
     );
 
-    // atualizar Firestore
+    // encontrar usuário no Firestore
     const users = await db
       .collection("users")
       .where("subscriptionId", "==", subscriptionId)
@@ -30,19 +32,21 @@ export async function cancelSubscription(req, res) {
     for (const doc of users.docs) {
       await doc.ref.update({
         planStatus: "cancelled",
-        planExpiresAt: admin.firestore.FieldValue.delete(),
+        nextPlanId: "nobreza", // downgrade quando expirar
       });
     }
 
     res.json({
       success: true,
-      message: "Assinatura cancelada",
+      message: "Assinatura cancelada. O plano permanece ativo até expirar.",
     });
 
   } catch (error) {
-    console.error("❌ Erro cancelando assinatura:", error?.response?.data || error);
+    console.error("❌ ERRO AO CANCELAR SUBSCRIPTION:", error.response?.data || error);
+
     res.status(500).json({
       error: "Erro ao cancelar assinatura",
+      details: error.response?.data || error.message,
     });
   }
 }
