@@ -598,6 +598,17 @@ export async function cancelSubscription(req, res) {
       }
     );
 
+    const users = await db
+      .collection("users")
+      .where("subscriptionId", "==", subscriptionId)
+      .get();
+
+    for (const doc of users.docs) {
+      await doc.ref.update({
+        planStatus: "cancelled",
+        nextPlanId: "nobreza", // downgrade quando expirar
+      });
+    }
     console.log("✅ Assinatura cancelada no Asaas");
 
     return res.json({
