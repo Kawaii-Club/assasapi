@@ -334,7 +334,7 @@ export async function asaasWebhook(req, res) {
 
       // CANCELAMENTO
       if (event === "SUBSCRIPTION_DELETED" ||
-          event === "SUBSCRIPTION_INACTIVATED") {
+        event === "SUBSCRIPTION_INACTIVATED") {
 
         await downgradeToBasic(subscription.customer);
 
@@ -442,9 +442,19 @@ export async function asaasWebhook(req, res) {
     // =========================
 
     if (event === "PAYMENT_CONFIRMED" ||
-        event === "PAYMENT_RECEIVED") {
+      event === "PAYMENT_RECEIVED") {
 
       const newPlan = user?.nextPlanId || user?.planId;
+
+      const startedAt = new Date(payment.paymentDate);
+
+      let expiresAt = new Date(startedAt);
+
+      if (user.planBillingCycle === "monthly") {
+        expiresAt.setMonth(expiresAt.getMonth() + 1);
+      } else {
+        expiresAt.setFullYear(expiresAt.getFullYear() + 1);
+      }
 
       await updateUserByCustomerId(customerId, {
 
@@ -452,27 +462,17 @@ export async function asaasWebhook(req, res) {
         nextPlanId: null,
         planStatus: "active",
         subscriptionId: payment.subscription || null,
-        planStartedAt: new Date(payment.paymentDate),
-        planExpiresAt: new Date(payment.dueDate),
-        lastPaymentAt: new Date(payment.paymentDate),
+
+        planStartedAt: startedAt,
+        planExpiresAt: expiresAt,
+        lastPaymentAt: startedAt,
 
       });
 
-      if (user?.fcmToken) {
-
-        await admin.messaging().send({
-
-          token: user.fcmToken,
-          notification: {
-            title: "Pagamento confirmado",
-            body: `Seu plano ${newPlan} foi ativado com sucesso 🎉`,
-          }
-
-        });
-
-      }
-
       console.log("✅ Plano atualizado para:", newPlan);
+      console.log("📅 Início:", startedAt);
+      console.log("📅 Expira:", expiresAt);
+
     }
 
     // =========================
