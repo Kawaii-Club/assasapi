@@ -587,7 +587,7 @@ export async function cancelSubscription(req, res) {
     console.log("🛑 Cancelando assinatura:", subscriptionId);
 
     const response = await axios.delete(
-      `https://api.asaas.com/v3/subscriptions/${subscriptionId}`,
+      `https://api-sandbox.asaas.com/v3/subscriptions/${subscriptionId}`,
       {
         headers: {
           access_token: process.env.ASAAS_API_KEY,
