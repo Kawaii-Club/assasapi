@@ -441,39 +441,56 @@ export async function asaasWebhook(req, res) {
     // PAGAMENTO CONFIRMADO
     // =========================
 
-    if (event === "PAYMENT_CONFIRMED" ||
-      event === "PAYMENT_RECEIVED") {
+if (event === "PAYMENT_CONFIRMED" ||
+    event === "PAYMENT_RECEIVED") {
 
-      const newPlan = user?.nextPlanId || user?.planId;
+  const newPlan = user?.nextPlanId || user?.planId;
 
-      const startedAt = new Date(payment.paymentDate);
+  const startedAt = new Date(payment.paymentDate);
 
-      let expiresAt = new Date(startedAt);
+  let expiresAt = new Date(startedAt);
 
-      if (user.planBillingCycle === "monthly") {
-        expiresAt.setMonth(expiresAt.getMonth() + 1);
-      } else {
-        expiresAt.setFullYear(expiresAt.getFullYear() + 1);
-      }
+  if (user.planBillingCycle === "monthly") {
+    expiresAt.setMonth(expiresAt.getMonth() + 1);
+  } else {
+    expiresAt.setFullYear(expiresAt.getFullYear() + 1);
+  }
 
-      await updateUserByCustomerId(customerId, {
+  await updateUserByCustomerId(customerId, {
+    planId: newPlan,
+    nextPlanId: null,
+    planStatus: "active",
+    subscriptionId: payment.subscription || null,
+    planStartedAt: startedAt,
+    planExpiresAt: expiresAt,
+    lastPaymentAt: startedAt,
+  });
 
+  console.log("✅ Plano atualizado para:", newPlan);
+
+  // 🔔 PUSH DE PAGAMENTO CONFIRMADO
+  if (user?.fcmToken) {
+
+    await admin.messaging().send({
+      token: user.fcmToken,
+      notification: {
+        title: "Pagamento confirmado 🎉",
+        body: `Seu plano ${newPlan} foi ativado com sucesso!`,
+      },
+      data: {
+        type: "payment_confirmed",
         planId: newPlan,
-        nextPlanId: null,
-        planStatus: "active",
-        subscriptionId: payment.subscription || null,
+        paymentId: payment.id,
+      },
+    });
 
-        planStartedAt: startedAt,
-        planExpiresAt: expiresAt,
-        lastPaymentAt: startedAt,
+    console.log("🔔 Push de confirmação enviado");
+  }
+  console.log("✅ Plano atualizado para:", newPlan);
+  console.log("📅 Início:", startedAt);
+  console.log("📅 Expira:", expiresAt);
+}
 
-      });
-
-      console.log("✅ Plano atualizado para:", newPlan);
-      console.log("📅 Início:", startedAt);
-      console.log("📅 Expira:", expiresAt);
-
-    }
 
     // =========================
     // PAGAMENTO VENCIDO
