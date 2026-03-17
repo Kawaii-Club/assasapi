@@ -3,11 +3,11 @@ import dotenv from "dotenv";
 
 dotenv.config(); 
 
-const ASAAS_URL = process.env.ASAAS_API_URL;
-const ASAAS_KEY = process.env.ASAAS_API_KEY;
+const ASAAS_API_URL = process.env.ASAAS_API_URL;
+const ASAAS_API_KEY = process.env.ASAAS_API_KEY;
 
-if (!ASAAS_URL || !ASAAS_KEY) {
-  throw new Error("ASAAS_URL ou ASAAS_KEY não definidos");
+if (!ASAAS_API_URL || !ASAAS_API_KEY) {
+  throw new Error("ASAAS_API_URL ou ASAAS_API_KEY não definidos");
 }
 
 export async function createExternalCardSubscription({
@@ -18,7 +18,7 @@ export async function createExternalCardSubscription({
   cycle,
 }) {
   const response = await axios.post(
-    `${ASAAS_URL}/paymentLinks`,
+    `${ASAAS_API_URL}/paymentLinks`,
     {
       name: `Plano ${planId}`,
       description: `Assinatura ${planId}`,
@@ -31,7 +31,7 @@ export async function createExternalCardSubscription({
     },
     {
       headers: {
-        access_token: ASAAS_KEY,
+        access_token: ASAAS_API_KEY,
         "Content-Type": "application/json",
       },
     }

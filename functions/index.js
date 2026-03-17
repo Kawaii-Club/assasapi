@@ -8,7 +8,7 @@ import {
   getSubscriptionPayments 
 } from "./src/services/asaas.service.js";
 import { todayPlus } from "./src/utils/date.js";
-import { ASAAS_KEY, ASAAS_URL, getAsaasClient } from './src/config/asaas.js';
+import { ASAAS_API_KEY, ASAAS_API_URL, getAsaasClient } from './src/config/asaas.js';
 
 export const sendNotification = onCall(async (request) => {
   const { token, title, body, payload } = request.data;
@@ -38,7 +38,7 @@ export const sendNotification = onCall(async (request) => {
 
 export const createSubscription = onCall(
   {
-    secrets: [ASAAS_KEY, ASAAS_URL],
+    secrets: [ASAAS_API_KEY, ASAAS_API_URL],
     timeoutSeconds: 120,
   },
   async (request) => {
@@ -51,8 +51,8 @@ export const createSubscription = onCall(
     }
 
     try {
-      const currentKey = ASAAS_KEY.value();
-      const currentUrl = ASAAS_URL.value();
+      const currentKey = ASAAS_API_KEY.value();
+      const currentUrl = ASAAS_API_URL.value();
 
       const {
         userId,
