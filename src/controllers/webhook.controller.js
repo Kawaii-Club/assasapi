@@ -73,9 +73,17 @@ export async function asaasWebhook(req, res) {
         console.log("🆕 Assinatura criada:", user.id);
       }
 
+      // ✅ FIX: só faz downgrade se o plano estava realmente ativo.
+      // Se o status era "pending_payment", significa que foi um cancelamento
+      // manual de pagamento pendente (via cancelPendingPayment) — nesse caso
+      // o próprio endpoint já limpou o usuário corretamente, sem downgrade.
       if (event === "SUBSCRIPTION_DELETED" || event === "SUBSCRIPTION_INACTIVATED") {
-        await downgradeToBasic(subscription.customer);
-        console.log("❌ Assinatura cancelada:", user.id);
+        if (user.planStatus === "active") {
+          await downgradeToBasic(subscription.customer);
+          console.log("❌ Assinatura ativa cancelada, downgrade aplicado:", user.id);
+        } else {
+          console.log("ℹ️ Assinatura pendente deletada, downgrade ignorado:", user.id);
+        }
       }
 
       return res.status(200).json({ received: true });
@@ -171,7 +179,6 @@ export async function asaasWebhook(req, res) {
 
     // =========================
     // PAGAMENTO CONFIRMADO
-    // ✅ FIX: valida que o pagamento pertence à assinatura atual do usuário
     // =========================
 
     if (event === "PAYMENT_CONFIRMED" || event === "PAYMENT_RECEIVED") {

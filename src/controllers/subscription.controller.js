@@ -1,4 +1,5 @@
 import axios from "axios";
+import admin from "firebase-admin";
 import { getUser, updateUser } from "../services/user.service.js";
 import {
   createSubscription,
@@ -7,14 +8,26 @@ import {
 } from "../services/asaas.service.js";
 import { todayPlus } from "../utils/date.js";
 
+const db = admin.firestore(); // ✅ FIX: estava faltando em cancelSubscription
+
+const ASAAS_API = process.env.ASAAS_ENV === "production"
+  ? "https://api.asaas.com/v3"
+  : "https://api-sandbox.asaas.com/v3";
+
+const asaasHeaders = {
+  access_token: process.env.ASAAS_API_KEY,
+  "Content-Type": "application/json",
+};
+
+// =========================================================
+// CRIAR / ATUALIZAR ASSINATURA
+// =========================================================
+
 export async function createSubscriptionController(req, res) {
   try {
     const { userId, planId, value, cycle, billingType } = req.body;
 
-    // ================= VALIDAR REQUEST =================
-
     const missingFields = [];
-
     if (!userId) missingFields.push("userId");
     if (!planId) missingFields.push("planId");
     if (value === undefined || value === null) missingFields.push("value");
@@ -22,29 +35,19 @@ export async function createSubscriptionController(req, res) {
     if (!billingType) missingFields.push("billingType");
 
     if (missingFields.length > 0) {
-      return res.status(400).json({
-        success: false,
-        error: "Campos obrigatórios faltando",
-        missingFields,
-      });
+      return res.status(400).json({ success: false, error: "Campos obrigatórios faltando", missingFields });
     }
-
     if (typeof value !== "number" || value <= 0) {
       return res.status(400).json({ success: false, error: "Valor inválido" });
     }
-
     if (!["MONTHLY", "YEARLY"].includes(cycle)) {
       return res.status(400).json({ success: false, error: "Ciclo inválido" });
     }
-
     if (!["PIX", "BOLETO", "CREDIT_CARD"].includes(billingType)) {
       return res.status(400).json({ success: false, error: "Tipo de pagamento inválido" });
     }
 
-    // ================= BUSCAR USUÁRIO =================
-
     let user;
-
     try {
       user = await getUser(userId);
     } catch (err) {
@@ -52,55 +55,31 @@ export async function createSubscriptionController(req, res) {
       return res.status(500).json({ success: false, error: "Erro ao buscar usuário" });
     }
 
-    if (!user) {
-      return res.status(404).json({ success: false, error: "Usuário não encontrado" });
-    }
-
-    if (!user.email || !user.cpf) {
-      return res.status(400).json({ success: false, error: "Usuário sem email ou CPF" });
-    }
+    if (!user) return res.status(404).json({ success: false, error: "Usuário não encontrado" });
+    if (!user.email || !user.cpf) return res.status(400).json({ success: false, error: "Usuário sem email ou CPF" });
 
     // =========================================================
     // CASO 1 — USUÁRIO JÁ POSSUI ASSINATURA ATIVA (UPGRADE/DOWNGRADE)
     // =========================================================
 
     if (user.subscriptionId && user.planStatus === "active") {
-
       try {
-
         const isDowngrade = user.planPrice && value < user.planPrice;
 
-        // ================= DOWNGRADE (próximo ciclo) =================
         if (isDowngrade) {
-          await updateUser(userId, {
-            nextPlanId: planId,
-          });
-
-          return res.json({
-            success: true,
-            message: "Downgrade programado para o próximo ciclo",
-          });
+          await updateUser(userId, { nextPlanId: planId });
+          return res.json({ success: true, message: "Downgrade programado para o próximo ciclo" });
         }
 
-        // ================= UPGRADE (imediato) =================
-
         const payload = {
-          value,
-          cycle,
-          billingType,
+          value, cycle, billingType,
           nextDueDate: todayPlus(0),
           description: `Plano ${planId}`,
           updatePendingPayments: true,
         };
 
-        const updatedSubscription = await updateSubscription(
-          user.subscriptionId,
-          payload
-        );
+        const updatedSubscription = await updateSubscription(user.subscriptionId, payload);
 
-        // ✅ FIX: salva nextPlanId E atualiza subscriptionId para o novo.
-        // Isso garante que o webhook valide corretamente pelo subscription ID
-        // e não promova o plano ao receber um pagamento de ciclo anterior.
         await updateUser(userId, {
           nextPlanId: planId,
           subscriptionId: updatedSubscription.id,
@@ -109,14 +88,11 @@ export async function createSubscriptionController(req, res) {
         await new Promise(resolve => setTimeout(resolve, 1500));
 
         const payments = await getSubscriptionPayments(updatedSubscription.id);
-
-        let checkoutUrl = null;
-        let pixCode = null;
+        let checkoutUrl = null, pixCode = null;
 
         if (payments?.data?.length > 0) {
-          const payment = payments.data[0];
-          checkoutUrl = payment?.invoiceUrl || null;
-          pixCode = payment?.pixQrCode || null;
+          checkoutUrl = payments.data[0]?.invoiceUrl || null;
+          pixCode = payments.data[0]?.pixQrCode || null;
         }
 
         return res.json({
@@ -129,7 +105,6 @@ export async function createSubscriptionController(req, res) {
 
       } catch (err) {
         console.warn("⚠️ erro ao atualizar subscription:", err.response?.data || err);
-        // fallback: cria nova assinatura
         user.subscriptionId = null;
       }
     }
@@ -148,13 +123,10 @@ export async function createSubscriptionController(req, res) {
           externalReference: userId,
         });
 
-        if (!customer?.id) {
-          throw new Error("Asaas não retornou customerId");
-        }
+        if (!customer?.id) throw new Error("Asaas não retornou customerId");
 
         await updateUser(userId, { customerId: customer.id });
         user.customerId = customer.id;
-
         console.log("💳 Novo customer criado:", customer.id);
       }
     } catch (err) {
@@ -167,26 +139,17 @@ export async function createSubscriptionController(req, res) {
     // =========================================================
 
     let subscription;
-
     try {
       const nextDueDate = cycle === "YEARLY" ? todayPlus(365) : todayPlus(30);
 
-      const payload = {
+      subscription = await createSubscription({
         customer: user.customerId,
-        billingType,
-        value,
-        cycle,
-        nextDueDate,
+        billingType, value, cycle, nextDueDate,
         description: `Plano ${planId}`,
         externalReference: userId,
-      };
+      });
 
-      subscription = await createSubscription(payload);
-
-      if (!subscription?.id) {
-        throw new Error("Asaas não retornou subscriptionId");
-      }
-
+      if (!subscription?.id) throw new Error("Asaas não retornou subscriptionId");
       console.log("✅ SUBSCRIPTION:", subscription.id);
 
     } catch (err) {
@@ -194,40 +157,25 @@ export async function createSubscriptionController(req, res) {
       return res.status(500).json({ success: false, error: "Erro ao criar assinatura no Asaas" });
     }
 
-    // =========================================================
-    // BUSCAR COBRANÇA GERADA
-    // =========================================================
-
-    let checkoutUrl = null;
-    let pixCode = null;
-
+    let checkoutUrl = null, pixCode = null;
     try {
       await new Promise(resolve => setTimeout(resolve, 1500));
-
       const payments = await getSubscriptionPayments(subscription.id);
 
       if (payments?.data?.length > 0) {
-        const payment = payments.data[0];
-        checkoutUrl = payment?.invoiceUrl || null;
-        pixCode = payment?.pixQrCode || null;
+        checkoutUrl = payments.data[0]?.invoiceUrl || null;
+        pixCode = payments.data[0]?.pixQrCode || null;
       }
     } catch (err) {
       console.error("⚠️ ERRO AO BUSCAR PAYMENT:", err.response?.data || err);
     }
 
-    // =========================================================
-    // ATUALIZA USER
-    // ✅ FIX: salva subscriptionId novo ANTES de nextPlanId.
-    // O webhook usa subscriptionId para validar o pagamento,
-    // então ele precisa estar atualizado para evitar race condition.
-    // =========================================================
-
     try {
       await updateUser(userId, {
-        subscriptionId: subscription.id,       // ✅ atualiza primeiro
+        subscriptionId: subscription.id,
         subscriptionCreatedAt: new Date(),
-        nextPlanId: planId,                     // plano só muda após webhook confirmar
-        planStatus: "pending_payment",          // planId atual permanece inalterado
+        nextPlanId: planId,
+        planStatus: "pending_payment",
       });
     } catch (err) {
       console.error("⚠️ ERRO AO ATUALIZAR USER:", err);
@@ -250,26 +198,87 @@ export async function createSubscriptionController(req, res) {
 }
 
 // =========================================================
-// ATUALIZAR SUBSCRIPTION ASAAS
+// CANCELAR PAGAMENTO PENDENTE (SEM REABRIR)
+//
+// Usar quando o usuário quer cancelar a cobrança pendente
+// e voltar à tela de planos para escolher normalmente.
+//
+// Body: { userId }
+// =========================================================
+
+export async function cancelPendingPayment(req, res) {
+  const { userId } = req.body;
+
+  if (!userId) {
+    return res.status(400).json({ success: false, error: "userId é obrigatório" });
+  }
+
+  let user;
+  try {
+    user = await getUser(userId);
+  } catch (err) {
+    return res.status(500).json({ success: false, error: "Erro ao buscar usuário" });
+  }
+
+  if (!user) return res.status(404).json({ success: false, error: "Usuário não encontrado" });
+
+  if (user.planStatus !== "pending_payment") {
+    return res.status(400).json({
+      success: false,
+      error: "Usuário não possui pagamento pendente.",
+    });
+  }
+
+  // ---- 1. Deletar assinatura pendente no Asaas ----
+  if (user.subscriptionId) {
+    try {
+      await axios.delete(`${ASAAS_API}/subscriptions/${user.subscriptionId}`, {
+        headers: asaasHeaders,
+      });
+      console.log("🗑️ Assinatura pendente deletada:", user.subscriptionId);
+    } catch (err) {
+      const status = err.response?.status;
+      if (status !== 404) {
+        console.error("❌ Erro ao deletar assinatura pendente:", err.response?.data || err);
+        return res.status(500).json({ success: false, error: "Erro ao cancelar cobrança no Asaas" });
+      }
+      console.warn("⚠️ Assinatura já não existia no Asaas, seguindo...");
+    }
+  }
+
+  // ---- 2. Limpar pendência no usuário ----
+  // ✅ FIX: volta para o status correto baseado no planId atual,
+  // sem tocar no planId — o plano ativo permanece intacto.
+  try {
+    await updateUser(userId, {
+      subscriptionId: null,
+      nextPlanId: null,
+      planStatus: user.planId && user.planId !== "nobreza" ? "active" : "inactive",
+    });
+    console.log("🧹 Pendência limpa para usuário:", userId);
+  } catch (err) {
+    console.error("⚠️ Erro ao limpar pendência do usuário:", err);
+    return res.status(500).json({ success: false, error: "Erro ao atualizar usuário" });
+  }
+
+  return res.json({ success: true, message: "Pagamento pendente cancelado com sucesso." });
+}
+
+// =========================================================
+// ATUALIZAR SUBSCRIPTION ASAAS (helper interno)
 // =========================================================
 
 export async function updateSubscription(subscriptionId, payload) {
   const response = await axios.put(
-    `https://api-sandbox.asaas.com/v3/subscriptions/${subscriptionId}`,
+    `${ASAAS_API}/subscriptions/${subscriptionId}`,
     payload,
-    {
-      headers: {
-        access_token: process.env.ASAAS_API_KEY,
-        "Content-Type": "application/json",
-      },
-    }
+    { headers: asaasHeaders }
   );
-
   return response.data;
 }
 
 // =========================================================
-// CANCELAR SUBSCRIPTION
+// CANCELAR SUBSCRIPTION DEFINITIVAMENTE
 // =========================================================
 
 export async function cancelSubscription(req, res) {
@@ -277,24 +286,17 @@ export async function cancelSubscription(req, res) {
     const { subscriptionId } = req.body;
 
     if (!subscriptionId) {
-      return res.status(400).json({
-        success: false,
-        error: "subscriptionId é obrigatório",
-      });
+      return res.status(400).json({ success: false, error: "subscriptionId é obrigatório" });
     }
 
     console.log("🛑 Cancelando assinatura:", subscriptionId);
 
     const response = await axios.delete(
-      `https://api.asaas.com/v3/subscriptions/${subscriptionId}`,
-      {
-        headers: {
-          access_token: process.env.ASAAS_API_KEY,
-          "Content-Type": "application/json",
-        },
-      }
+      `${ASAAS_API}/subscriptions/${subscriptionId}`,
+      { headers: asaasHeaders }
     );
 
+    // ✅ FIX: db agora está definido no topo do arquivo
     const users = await db
       .collection("users")
       .where("subscriptionId", "==", subscriptionId)
