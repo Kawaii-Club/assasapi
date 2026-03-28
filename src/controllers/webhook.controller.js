@@ -58,7 +58,7 @@ export async function asaasWebhook(req, res) {
     console.log("🔥 EVENTO:", event);
 
     // =========================================================
-    // EVENTOS DE ASSINATURA
+    // SUBSCRIPTION EVENTS
     // =========================================================
 
     if (event?.startsWith("SUBSCRIPTION_")) {
@@ -84,19 +84,11 @@ export async function asaasWebhook(req, res) {
       }, { merge: true });
 
       if (event === "SUBSCRIPTION_CREATED") {
-        if (user.planStatus !== "active") {
-          await updateUserByCustomerId(subscription.customer, {
-            subscriptionId: subscription.id,
-            planStatus: "pending_payment",
-            subscriptionCreatedAt: new Date(),
-          });
-        } else {
-          await updateUserByCustomerId(subscription.customer, {
-            subscriptionId: subscription.id,
-            subscriptionCreatedAt: new Date(),
-          });
-        }
-        console.log("🆕 Assinatura criada:", user.id);
+        await updateUserByCustomerId(subscription.customer, {
+          subscriptionId: subscription.id,
+          planStatus: user.planStatus === "active" ? "active" : "pending_payment",
+          subscriptionCreatedAt: new Date(),
+        });
       }
 
       if (event === "SUBSCRIPTION_DELETED" || event === "SUBSCRIPTION_INACTIVATED") {
@@ -105,12 +97,9 @@ export async function asaasWebhook(req, res) {
           await sendPush(
             user.fcmToken,
             "Assinatura encerrada",
-            "Seu plano foi encerrado. Você pode reativar quando quiser.",
+            "Seu plano foi encerrado.",
             { type: "subscription_cancelled" }
           );
-          console.log("❌ Assinatura ativa cancelada, downgrade:", user.id);
-        } else {
-          console.log("ℹ️ Assinatura pendente deletada, sem downgrade:", user.id);
         }
       }
 
@@ -118,7 +107,7 @@ export async function asaasWebhook(req, res) {
     }
 
     // =========================================================
-    // EVENTOS DE PAGAMENTO
+    // PAYMENT EVENTS
     // =========================================================
 
     if (!payment?.customer || !payment?.id) {
@@ -129,17 +118,7 @@ export async function asaasWebhook(req, res) {
     const user = await getUserByCustomerId(customerId);
     if (!user) return res.status(200).json({ ignored: true });
 
-    if (payment.subscription) {
-      await db.collection("subscriptions").doc(payment.subscription).set({
-        userId: user.id,
-        customerId: payment.customer,
-        subscriptionId: payment.subscription,
-        billingType: payment.billingType || null,
-        status: payment.status || "pending",
-        updatedAt: new Date(),
-      }, { merge: true });
-    }
-
+    // 🔥 SALVA ORDER (sempre)
     const orderRef = db.collection("orders").doc(payment.id);
     const orderSnap = await orderRef.get();
 
@@ -167,85 +146,29 @@ export async function asaasWebhook(req, res) {
     // =========================================================
     // PAYMENT_CREATED
     // =========================================================
-    if (event === "PAYMENT_CREATED") {
-      if (user.planStatus !== "active") {
-        await updateUserByCustomerId(customerId, { planStatus: "pending_payment" });
-        console.log("🧾 status → pending_payment:", payment.id);
-      } else {
-        console.log("🧾 Renovação de plano ativo, status mantido:", payment.id);
-      }
-    }
 
-    // =========================================================
-    // PAYMENT_DUE_DATE_WARNING
-    // =========================================================
-    if (event === "PAYMENT_DUE_DATE_WARNING") {
-      await sendPush(
-        user.fcmToken,
-        "Fatura prestes a vencer",
-        `Sua fatura vence em ${payment.dueDate}.`,
-        { type: "payment_due", paymentId: payment.id }
-      );
-      console.log("🔔 Alerta de vencimento enviado:", payment.id);
+    if (event === "PAYMENT_CREATED") {
+      await updateUserByCustomerId(customerId, {
+        planStatus: "pending_payment",
+      });
+      console.log("🧾 pending_payment:", payment.id);
     }
 
     // =========================================================
     // PAYMENT_CONFIRMED / RECEIVED
     // =========================================================
+
     if (event === "PAYMENT_CONFIRMED" || event === "PAYMENT_RECEIVED") {
 
-      console.log("🔍 DEBUG PAYMENT_RECEIVED:", JSON.stringify({
-        paymentId:      payment.id,
-        paymentSub:     payment.subscription,
-        paymentDate:    payment.paymentDate,
-        userSub:        user.subscriptionId,
-        lastPaymentId:  user.lastPaymentId,
-        userPlanId:     user.planId,
-        nextPlanId:     user.nextPlanId,
-        planStatus:     user.planStatus,
-        billingCycle:   user.billingCycle,
-        subMatch:       payment.subscription === user.subscriptionId,
-        isDuplicate:    user.lastPaymentId === payment.id,
-        newPlan:        user?.nextPlanId ?? user?.planId,
-        currentRank:    planRank(user.planId),
-        newRank:        planRank(user?.nextPlanId ?? user?.planId),
-        wouldDowngrade: planRank(user?.nextPlanId ?? user?.planId) < planRank(user.planId),
-      }, null, 2));
+      console.log("💰 PAGAMENTO CONFIRMADO:", payment.id);
 
-      // ── Proteção duplicidade ──
-      if (user.lastPaymentId === payment.id) {
-        console.log("🔁 [BLOQUEADO] Pagamento já processado:", payment.id);
-        return res.status(200).json({ ignored: true });
-      }
-
-      // ── Proteção assinatura diferente ──
-      if (
-        user.subscriptionId &&
-        payment.subscription &&
-        payment.subscription !== user.subscriptionId
-      ) {
-        console.warn("⚠️ [BLOQUEADO] Assinatura diferente:", {
-          paymentSub: payment.subscription,
-          userSub: user.subscriptionId,
-        });
+      // 🔥 FIX: só bloqueia duplicado se já estiver ACTIVE
+      if (user.lastPaymentId === payment.id && user.planStatus === "active") {
+        console.log("🔁 Já processado corretamente:", payment.id);
         return res.status(200).json({ ignored: true });
       }
 
       const newPlan = user?.nextPlanId ?? user?.planId;
-
-      // ── Proteção anti-downgrade ──
-      if (
-        user.planId &&
-        newPlan &&
-        planRank(newPlan) < planRank(user.planId)
-      ) {
-        console.warn("⚠️ [BLOQUEADO] Downgrade acidental:", {
-          current: user.planId,
-          next: newPlan,
-        });
-        await updateUserByCustomerId(customerId, { nextPlanId: null });
-        return res.status(200).json({ ignored: true });
-      }
 
       const startedAt = payment.paymentDate
         ? new Date(payment.paymentDate)
@@ -253,96 +176,48 @@ export async function asaasWebhook(req, res) {
 
       const expiresAt = calcExpiresAt(startedAt, user.billingCycle || "monthly");
 
-      const updatePayload = {
+      await updateUserByCustomerId(customerId, {
         planId: newPlan,
         nextPlanId: null,
-        planStatus: "active",
+        planStatus: "active", // 🔥 ESSENCIAL
         subscriptionId: payment.subscription || user.subscriptionId,
         billingCycle: user.billingCycle || "monthly",
         planStartedAt: startedAt,
         planExpiresAt: expiresAt,
         lastPaymentAt: startedAt,
         lastPaymentId: payment.id,
-        expirationAlertSent_30d: null,
-        expirationAlertSent_15d: null,
-        expirationAlertSent_7d: null,
-        expirationAlertSent_1d: null,
-      };
+      });
 
-      console.log("⏳ Atualizando usuário:", customerId);
-      console.log("📦 Payload:", JSON.stringify(updatePayload, null, 2));
+      console.log("✅ Plano ATIVADO:", newPlan);
+    }
 
-      // ✅ try/catch granular — mostra exatamente se o update falhou
-      try {
-        await updateUserByCustomerId(customerId, updatePayload);
-        console.log(`✅ [SUCESSO] Plano ativado: ${newPlan} | Expira: ${expiresAt.toISOString()}`);
-      } catch (updateErr) {
-        console.error("❌ [FALHA] updateUserByCustomerId falhou:", updateErr);
-        // Retorna 500 para o Asaas retentar o webhook
-        return res.status(500).json({ error: "Falha ao atualizar usuário" });
-      }
+    // =========================================================
+    // PAYMENT_DELETED (FIX IMPORTANTE)
+    // =========================================================
 
-      // ── Push ──
-      await sendPush(
-        user.fcmToken,
-        "Pagamento confirmado ✅",
-        `Seu plano ${newPlan} está ativo até ${expiresAt.toLocaleDateString("pt-BR")}.`,
-        { type: "payment_confirmed" }
-      );
+    if (event === "PAYMENT_DELETED") {
+      await updateUserByCustomerId(customerId, {
+        planStatus: user.planId && user.planId !== "nobreza"
+          ? "active"
+          : "inactive",
+      });
+
+      console.log("🗑️ Pendência limpa:", payment.id);
     }
 
     // =========================================================
     // PAYMENT_OVERDUE
     // =========================================================
+
     if (event === "PAYMENT_OVERDUE") {
       await downgradeToBasic(customerId);
-      await sendPush(
-        user.fcmToken,
-        "Pagamento em atraso ⚠️",
-        "Sua fatura venceu e seu plano foi rebaixado. Renove para recuperar o acesso.",
-        { type: "payment_overdue" }
-      );
       console.log("⛔ Plano rebaixado:", user.id);
-    }
-
-    // =========================================================
-    // PAYMENT_REFUNDED
-    // =========================================================
-    if (event === "PAYMENT_REFUNDED") {
-      await updateUserByCustomerId(customerId, {
-        planStatus: "refunded",
-        nextPlanId: null,
-      });
-      await sendPush(
-        user.fcmToken,
-        "Pagamento estornado",
-        "O valor do seu pagamento foi devolvido.",
-        { type: "payment_refunded" }
-      );
-      console.log("💸 Pagamento estornado:", payment.id);
-    }
-
-    // =========================================================
-    // PAYMENT_DELETED
-    // =========================================================
-    if (event === "PAYMENT_DELETED") {
-      if (user.planStatus === "pending_payment") {
-        await updateUserByCustomerId(customerId, {
-          planStatus: user.planId && user.planId !== "nobreza" ? "active" : "inactive",
-          subscriptionId: null,
-          nextPlanId: null,
-        });
-        console.log("🗑️ Pendência limpa:", payment.id);
-      } else {
-        console.log("🗑️ Cobrança deletada, plano ativo mantido:", payment.id);
-      }
     }
 
     return res.status(200).json({ received: true });
 
   } catch (err) {
     console.error("❌ WEBHOOK ERROR:", err.message);
-    console.error("❌ STACK:", err.stack);
-    return res.status(500).json({ error: "Webhook error", detail: err.message });
+    return res.status(500).json({ error: "Webhook error" });
   }
 }
