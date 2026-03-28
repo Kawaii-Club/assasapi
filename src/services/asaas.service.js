@@ -12,8 +12,20 @@ export async function createCustomer(data) {
   return res.data;
 }
 
-export async function getSubscriptionPayments(subscriptionId) {
+export async function updateSubscriptionAsaas(id, data) {
   const asaas = getAsaasClient();
-  const res = await asaas.get(`/subscriptions/${subscriptionId}/payments`);
+  const res = await asaas.put(`/subscriptions/${id}`, data);
+  return res.data;
+}
+
+export async function deleteSubscriptionAsaas(id) {
+  const asaas = getAsaasClient();
+  const res = await asaas.delete(`/subscriptions/${id}`);
+  return res.data;
+}
+
+export async function getSubscriptionPayments(id) {
+  const asaas = getAsaasClient();
+  const res = await asaas.get(`/subscriptions/${id}/payments`);
   return res.data;
 }
