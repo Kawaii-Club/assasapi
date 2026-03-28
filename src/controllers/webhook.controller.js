@@ -3,6 +3,32 @@ import admin from "firebase-admin";
 
 const db = admin.firestore();
 
+// ─────────────────────────────────────────────────────────────
+// Hierarquia de planos
+// ─────────────────────────────────────────────────────────────
+const PLAN_ORDER = { nobreza: 0, alteza: 1, majestade: 2 };
+
+function planRank(planId) {
+  return PLAN_ORDER[planId?.toLowerCase()] ?? -1;
+}
+
+// ─────────────────────────────────────────────────────────────
+// Helpers
+// ─────────────────────────────────────────────────────────────
+
+async function sendPush(fcmToken, title, body, data = {}) {
+  if (!fcmToken) return;
+  try {
+    await admin.messaging().send({
+      token: fcmToken,
+      notification: { title, body },
+      data,
+    });
+  } catch (err) {
+    console.warn("⚠️ Push falhou:", err.message);
+  }
+}
+
 async function downgradeToBasic(customerId) {
   await updateUserByCustomerId(customerId, {
     planId: "nobreza",
@@ -12,17 +38,31 @@ async function downgradeToBasic(customerId) {
     planStartedAt: null,
     planExpiresAt: null,
   });
-
-  console.log("👑 Usuário voltou para plano Nobreza:", customerId);
+  console.log("👑 Usuário voltou para Nobreza:", customerId);
 }
+
+// Calcula a data de expiração baseado no ciclo salvo no usuário
+function calcExpiresAt(startedAt, billingCycle) {
+  const d = new Date(startedAt);
+  const cycle = billingCycle?.toLowerCase();
+
+  if (cycle === "yearly") {
+    d.setFullYear(d.getFullYear() + 1);
+  } else {
+    // default: monthly
+    d.setMonth(d.getMonth() + 1);
+  }
+  return d;
+}
+
+// =========================================================
+// WEBHOOK PRINCIPAL
+// =========================================================
 
 export async function asaasWebhook(req, res) {
   try {
 
-    // =========================
-    // SEGURANÇA
-    // =========================
-
+    // ── Segurança ──
     if (req.headers["asaas-access-token"] !== process.env.ASAAS_WEBHOOK_TOKEN) {
       console.log("⛔ Token inválido");
       return res.status(401).json({ error: "Invalid webhook" });
@@ -30,11 +70,11 @@ export async function asaasWebhook(req, res) {
 
     const { event, payment, subscription } = req.body;
 
-    console.log("🔥 EVENTO RECEBIDO:", event);
+    console.log("🔥 EVENTO:", event);
 
-    // =========================
+    // =========================================================
     // EVENTOS DE ASSINATURA
-    // =========================
+    // =========================================================
 
     if (event?.startsWith("SUBSCRIPTION_")) {
 
@@ -43,14 +83,10 @@ export async function asaasWebhook(req, res) {
       }
 
       const user = await getUserByCustomerId(subscription.customer);
-
       if (!user) return res.status(200).json({ ignored: true });
 
-      const subscriptionRef = db
-        .collection("subscriptions")
-        .doc(subscription.id);
-
-      await subscriptionRef.set({
+      // Mantém coleção subscriptions atualizada
+      await db.collection("subscriptions").doc(subscription.id).set({
         userId: user.id,
         customerId: subscription.customer,
         subscriptionId: subscription.id,
@@ -63,99 +99,63 @@ export async function asaasWebhook(req, res) {
         updatedAt: new Date(),
       }, { merge: true });
 
+      // ── SUBSCRIPTION_CREATED ──
       if (event === "SUBSCRIPTION_CREATED") {
         await updateUserByCustomerId(subscription.customer, {
           subscriptionId: subscription.id,
-          planStatus: "pending",
+          planStatus: "pending_payment",
           subscriptionCreatedAt: new Date(),
         });
-
         console.log("🆕 Assinatura criada:", user.id);
       }
 
-      // ✅ FIX: só faz downgrade se o plano estava realmente ativo.
-      // Se o status era "pending_payment", significa que foi um cancelamento
-      // manual de pagamento pendente (via cancelPendingPayment) — nesse caso
-      // o próprio endpoint já limpou o usuário corretamente, sem downgrade.
+      // ── SUBSCRIPTION_DELETED / INACTIVATED ──
+      // Só faz downgrade se o plano estava ativo.
+      // Se estava pending_payment, o cancelPendingPayment já limpou — ignora.
       if (event === "SUBSCRIPTION_DELETED" || event === "SUBSCRIPTION_INACTIVATED") {
         if (user.planStatus === "active") {
           await downgradeToBasic(subscription.customer);
-          console.log("❌ Assinatura ativa cancelada, downgrade aplicado:", user.id);
+          await sendPush(
+            user.fcmToken,
+            "Assinatura encerrada",
+            "Seu plano foi encerrado. Você pode reativar quando quiser."
+          );
+          console.log("❌ Assinatura ativa cancelada, downgrade:", user.id);
         } else {
-          console.log("ℹ️ Assinatura pendente deletada, downgrade ignorado:", user.id);
+          console.log("ℹ️ Assinatura pendente deletada, sem downgrade:", user.id);
         }
       }
 
       return res.status(200).json({ received: true });
     }
 
-    // =========================
+    // =========================================================
     // EVENTOS DE PAGAMENTO
-    // =========================
+    // =========================================================
 
     if (!payment?.customer || !payment?.id) {
       return res.status(200).json({ ignored: true });
     }
 
     const customerId = payment.customer;
-
     const user = await getUserByCustomerId(customerId);
-
     if (!user) return res.status(200).json({ ignored: true });
 
-    // =========================
-    // GARANTIR SUBSCRIPTION
-    // =========================
-
+    // ── Garante subscription na coleção ──
     if (payment.subscription) {
-      const subscriptionRef = db
-        .collection("subscriptions")
-        .doc(payment.subscription);
-
-      await subscriptionRef.set({
+      await db.collection("subscriptions").doc(payment.subscription).set({
         userId: user.id,
         customerId: payment.customer,
         subscriptionId: payment.subscription,
         billingType: payment.billingType || null,
         status: payment.status || "pending",
-        createdAt: admin.firestore.FieldValue.serverTimestamp(),
         updatedAt: new Date(),
       }, { merge: true });
-
-      console.log("📦 Subscription registrada via payment:", payment.subscription);
     }
 
-    // =========================
-    // ALERTA DE VENCIMENTO
-    // =========================
-
-    if (event === "PAYMENT_DUE_DATE_WARNING") {
-
-      if (!user?.fcmToken) return res.status(200).json({ ignored: true });
-
-      await admin.messaging().send({
-        token: user.fcmToken,
-        notification: {
-          title: "Fatura prestes a vencer",
-          body: `Sua fatura vence em ${payment.dueDate}`,
-        },
-        data: {
-          type: "payment_due",
-          paymentId: payment.id,
-          invoiceUrl: payment.invoiceUrl || "",
-        },
-      });
-
-      console.log("🔔 Notificação de vencimento enviada");
-    }
-
-    // =========================
-    // SALVAR ORDER
-    // =========================
-
+    // ── Salva/atualiza order ──
     const orderRef = db.collection("orders").doc(payment.id);
-    const orderSnapshot = await orderRef.get();
-    const isNewOrder = !orderSnapshot.exists;
+    const orderSnap = await orderRef.get();
 
     await orderRef.set({
       userId: user.id,
@@ -170,101 +170,149 @@ export async function asaasWebhook(req, res) {
       pixCode: payment.pixQrCode || null,
       paidAt: payment.paymentDate || null,
       updatedAt: new Date(),
-      ...(isNewOrder && {
+      ...(!orderSnap.exists && {
         createdAt: admin.firestore.FieldValue.serverTimestamp(),
       }),
     }, { merge: true });
 
-    console.log("💾 Pedido salvo/atualizado:", payment.id);
+    console.log("💾 Order salva:", payment.id);
 
-    // =========================
-    // PAGAMENTO CONFIRMADO
-    // =========================
+    // =========================================================
+    // PAYMENT_CREATED — cobrança gerada (ainda não paga)
+    // =========================================================
+    if (event === "PAYMENT_CREATED") {
+      console.log("🧾 Cobrança criada:", payment.id);
+      // Nenhuma ação no plano — aguarda confirmação
+    }
 
+    // =========================================================
+    // PAYMENT_DUE_DATE_WARNING — fatura prestes a vencer
+    // =========================================================
+    if (event === "PAYMENT_DUE_DATE_WARNING") {
+      await sendPush(
+        user.fcmToken,
+        "Fatura prestes a vencer",
+        `Sua fatura de ${payment.value ? `R$ ${payment.value.toFixed(2)}` : ""} vence em ${payment.dueDate}.`,
+        { type: "payment_due", paymentId: payment.id, invoiceUrl: payment.invoiceUrl || "" }
+      );
+      console.log("🔔 Alerta de vencimento de fatura enviado");
+    }
+
+    // =========================================================
+    // PAYMENT_CONFIRMED / PAYMENT_RECEIVED — pagamento confirmado
+    // =========================================================
     if (event === "PAYMENT_CONFIRMED" || event === "PAYMENT_RECEIVED") {
 
-      // Garante que o pagamento é da assinatura atual do usuário.
-      // Sem isso, um PAYMENT_RECEIVED de um ciclo anterior pode ativar
-      // o nextPlanId antes da hora.
+      // ── Proteção: ignora pagamentos de assinaturas antigas ──
       if (
         user.subscriptionId &&
         payment.subscription &&
         payment.subscription !== user.subscriptionId
       ) {
-        console.warn(
-          "⚠️ Pagamento de assinatura diferente da atual, ignorando promoção de plano.",
-          { paymentSubscription: payment.subscription, userSubscription: user.subscriptionId }
-        );
+        console.warn("⚠️ Pagamento de assinatura diferente da atual — ignorado.", {
+          paymentSub: payment.subscription,
+          userSub: user.subscriptionId,
+        });
         return res.status(200).json({ ignored: true });
       }
 
+      // ── Determina o plano a ativar ──
+      // usa nextPlanId se existir, caso contrário mantém o atual
       const newPlan = user?.nextPlanId ?? user?.planId;
 
-      const startedAt = new Date(payment.paymentDate);
-      let expiresAt = new Date(startedAt);
-
-      if (user.planBillingCycle === "monthly") {
-        expiresAt.setMonth(expiresAt.getMonth() + 1);
-      } else {
-        expiresAt.setFullYear(expiresAt.getFullYear() + 1);
+      // ── Proteção anti-downgrade acidental via webhook ──
+      // Garante que um pagamento recorrente de ciclo passado não rebaixe o plano
+      if (
+        user.planId &&
+        newPlan &&
+        planRank(newPlan) < planRank(user.planId)
+      ) {
+        console.warn("⚠️ Webhook tentaria fazer downgrade acidental — ignorado.", {
+          current: user.planId,
+          next: newPlan,
+        });
+        await updateUserByCustomerId(customerId, { nextPlanId: null });
+        return res.status(200).json({ ignored: true });
       }
+
+      const startedAt = payment.paymentDate
+        ? new Date(payment.paymentDate)
+        : new Date();
+
+      const expiresAt = calcExpiresAt(startedAt, user.billingCycle);
 
       await updateUserByCustomerId(customerId, {
         planId: newPlan,
         nextPlanId: null,
         planStatus: "active",
-        subscriptionId: payment.subscription || null,
+        subscriptionId: payment.subscription || user.subscriptionId,
+        billingCycle: user.billingCycle || "monthly",
         planStartedAt: startedAt,
         planExpiresAt: expiresAt,
         lastPaymentAt: startedAt,
+        lastPaymentId: payment.id,
+        // limpa alertas de expiração para o novo ciclo
+        expirationAlertSent_30d: null,
+        expirationAlertSent_15d: null,
+        expirationAlertSent_7d: null,
+        expirationAlertSent_1d: null,
       });
 
-      if (user?.fcmToken) {
-        await admin.messaging().send({
-          token: user.fcmToken,
-          notification: {
-            title: "Pagamento confirmado",
-            body: `Seu plano ${newPlan} foi ativado com sucesso 🎉`,
-          },
-        });
-      }
+      await sendPush(
+        user.fcmToken,
+        "Pagamento confirmado ✅",
+        `Seu plano ${newPlan} está ativo até ${expiresAt.toLocaleDateString("pt-BR")}.`
+      );
 
-      console.log("✅ Plano atualizado para:", newPlan);
-      console.log("📅 Início:", startedAt);
-      console.log("📅 Expira:", expiresAt);
+      console.log(`✅ Plano ativado: ${newPlan} | Expira: ${expiresAt}`);
     }
 
-    // =========================
-    // PAGAMENTO VENCIDO
-    // =========================
-
+    // =========================================================
+    // PAYMENT_OVERDUE — fatura vencida sem pagamento
+    // =========================================================
     if (event === "PAYMENT_OVERDUE") {
-
       await downgradeToBasic(customerId);
 
-      if (user?.fcmToken) {
-        await admin.messaging().send({
-          token: user.fcmToken,
-          notification: {
-            title: "Pagamento em atraso",
-            body: "Seu plano voltou para o plano básico",
-          },
-        });
-      }
+      await sendPush(
+        user.fcmToken,
+        "Pagamento em atraso ⚠️",
+        "Sua fatura venceu e seu plano foi rebaixado. Renove para recuperar o acesso."
+      );
 
-      console.log("⛔ Plano expirado:", user.id);
+      console.log("⛔ Plano rebaixado por inadimplência:", user.id);
     }
 
-    // =========================
-    // PAGAMENTO DELETADO
-    // =========================
-
-    if (event === "PAYMENT_DELETED") {
+    // =========================================================
+    // PAYMENT_REFUNDED — pagamento estornado
+    // =========================================================
+    if (event === "PAYMENT_REFUNDED") {
       await updateUserByCustomerId(customerId, {
-        planStatus: "canceled",
+        planStatus: "refunded",
+        nextPlanId: null,
       });
 
-      console.log("❌ Pagamento deletado:", user.id);
+      await sendPush(
+        user.fcmToken,
+        "Estorno realizado",
+        "O valor do seu pagamento foi estornado."
+      );
+
+      console.log("💸 Pagamento estornado:", payment.id);
+    }
+
+    // =========================================================
+    // PAYMENT_DELETED — cobrança removida
+    // =========================================================
+    if (event === "PAYMENT_DELETED") {
+      // Só altera o status se ainda estava pendente
+      if (user.planStatus === "pending_payment") {
+        await updateUserByCustomerId(customerId, {
+          planStatus: user.planId && user.planId !== "nobreza" ? "active" : "inactive",
+          subscriptionId: null,
+          nextPlanId: null,
+        });
+      }
+      console.log("🗑️ Cobrança deletada:", payment.id);
     }
 
     return res.status(200).json({ received: true });
