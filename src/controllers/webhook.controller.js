@@ -146,14 +146,20 @@ export async function asaasWebhook(req, res) {
     // =========================================================
     // PAYMENT_CREATED
     // =========================================================
+if (event === "PAYMENT_CREATED") {
 
-    if (event === "PAYMENT_CREATED") {
-      await updateUserByCustomerId(customerId, {
-        planStatus: "pending_payment",
-      });
-      console.log("🧾 pending_payment:", payment.id);
-    }
+  // 🔥 NÃO SOBRESCREVE SE JÁ ESTÁ ATIVO
+  if (user.planStatus === "active") {
+    console.log("🟡 Ignorando pending_payment (já ativo)");
+    return res.status(200).json({ ignored: true });
+  }
 
+  await updateUserByCustomerId(customerId, {
+    planStatus: "pending_payment",
+  });
+
+  console.log("🧾 pending_payment:", payment.id);
+}
     // =========================================================
     // PAYMENT_CONFIRMED / RECEIVED
     // =========================================================
