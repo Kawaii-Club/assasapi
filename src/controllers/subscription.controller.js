@@ -12,7 +12,7 @@ import { todayPlus } from "../utils/date.js";
 const db = admin.firestore();
 
 // ===============================
-// HELPER: pegar pagamento
+// HELPER
 // ===============================
 async function getPendingPayment(subscriptionId) {
   for (let i = 0; i < 5; i++) {
@@ -50,9 +50,7 @@ export async function createSubscriptionController(req, res) {
     const user = await getUser(userId);
     if (!user) return res.status(404).json({ error: "Usuário não encontrado" });
 
-    // ===============================
     // CUSTOMER
-    // ===============================
     if (!user.customerId) {
       const customer = await createCustomer({
         name: user.name,
@@ -65,9 +63,7 @@ export async function createSubscriptionController(req, res) {
       user.customerId = customer.id;
     }
 
-    // ===============================
-    // UPDATE (upgrade)
-    // ===============================
+    // UPGRADE
     if (user.subscriptionId && user.planStatus === "active") {
       try {
         const updated = await updateSubscriptionAsaas(user.subscriptionId, {
@@ -96,9 +92,7 @@ export async function createSubscriptionController(req, res) {
       }
     }
 
-    // ===============================
-    // CREATE NEW
-    // ===============================
+    // CREATE
     const subscription = await createSubscription({
       customer: user.customerId,
       billingType,
@@ -129,7 +123,7 @@ export async function createSubscriptionController(req, res) {
 }
 
 // ===============================
-// CANCELAR PENDENTE
+// CANCELAR PAGAMENTO PENDENTE
 // ===============================
 export async function cancelPendingPayment(req, res) {
   try {
@@ -157,7 +151,7 @@ export async function cancelPendingPayment(req, res) {
 }
 
 // ===============================
-// CANCELAR DEFINITIVO
+// CANCELAR ASSINATURA
 // ===============================
 export async function cancelSubscription(req, res) {
   try {
