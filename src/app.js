@@ -10,7 +10,7 @@ import { asaasWebhook } from "./controllers/webhook.controller.js";
 import { checkExpiringSubscriptions } from "./controllers/checkExpiring.controller.js";
 import { authMiddleware } from "./middlewares/auth.middleware.js";
 import { requireActiveSubscription } from "./middlewares/subscription.middleware.js";
-import { cancelSubscription } from "./controllers/subscription.controller.js";
+import { cancelSubscription, cancelPendingPayment } from "./controllers/subscription.controller.js";
 const app = express();
 
 app.use(cors({
@@ -28,6 +28,8 @@ app.get("/health", (_, res) => {
 app.use("/api", paymentsRoutes);
 
 app.post("/api/cancel-subscription", cancelSubscription);
+app.post("/api/cancel-pending-payment", cancelPendingPayment); // ← adicionar essa linha
+
 app.use("/api/connections", connectionRoutes);
 app.post("/api/webhook/asaas", asaasWebhook);
 app.get("/api/connections",
