@@ -146,20 +146,20 @@ export async function asaasWebhook(req, res) {
     // =========================================================
     // PAYMENT_CREATED
     // =========================================================
-if (event === "PAYMENT_CREATED") {
+    if (event === "PAYMENT_CREATED") {
 
-  // 🔥 NÃO SOBRESCREVE SE JÁ ESTÁ ATIVO
-  if (user.planStatus === "active") {
-    console.log("🟡 Ignorando pending_payment (já ativo)");
-    return res.status(200).json({ ignored: true });
-  }
+      // 🔥 NÃO SOBRESCREVE SE JÁ ESTÁ ATIVO
+      if (user.planStatus === "active") {
+        console.log("🟡 Ignorando pending_payment (já ativo)");
+        return res.status(200).json({ ignored: true });
+      }
 
-  await updateUserByCustomerId(customerId, {
-    planStatus: "pending_payment",
-  });
+      await updateUserByCustomerId(customerId, {
+        planStatus: "pending_payment",
+      });
 
-  console.log("🧾 pending_payment:", payment.id);
-}
+      console.log("🧾 pending_payment:", payment.id);
+    }
     // =========================================================
     // PAYMENT_CONFIRMED / RECEIVED
     // =========================================================
@@ -202,15 +202,20 @@ if (event === "PAYMENT_CREATED") {
     // =========================================================
 
     if (event === "PAYMENT_DELETED") {
-      await updateUserByCustomerId(customerId, {
-        planStatus: user.planId && user.planId !== "nobreza"
-          ? "active"
-          : "inactive",
-      });
+      await orderRef.set({
+        status: "deleted",
+        updatedAt: new Date(),
+      }, { merge: true });
 
-      console.log("🗑️ Pendência limpa:", payment.id);
+      if (user.planStatus === "active") {
+        console.log("🟡 Pagamento deletado mas plano já ativo, ignorando:", payment.id);
+        return res.status(200).json({ ignored: true });
+      }
+
+      // 🔥 Sem plano ativo → volta para o básico
+      await downgradeToBasic(customerId);
+      console.log("🗑️ Pendência limpa, voltou para Nobreza:", payment.id);
     }
-
     // =========================================================
     // PAYMENT_OVERDUE
     // =========================================================

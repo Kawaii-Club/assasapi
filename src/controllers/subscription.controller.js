@@ -72,6 +72,8 @@ export async function createSubscriptionController(req, res) {
           billingType,
           nextDueDate: todayPlus(0),
           updatePendingPayments: true,
+            description: planId,                  // 🔥 nome do plano
+
         });
 
         const payment = await getPendingPayment(updated.id);
@@ -98,7 +100,8 @@ export async function createSubscriptionController(req, res) {
       billingType,
       value,
       cycle,
-      nextDueDate: todayPlus(cycle === "YEARLY" ? 365 : 30),
+      nextDueDate: todayPlus(3),   // 🔥 fatura vence em 3 dias, ciclo do plano é controlado pelo "cycle"
+      description: planId,
     });
 
     const payment = await getPendingPayment(subscription.id);
