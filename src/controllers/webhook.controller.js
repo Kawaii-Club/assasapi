@@ -92,7 +92,19 @@ export async function asaasWebhook(req, res) {
       }
 
       if (event === "SUBSCRIPTION_DELETED" || event === "SUBSCRIPTION_INACTIVATED") {
-        if (user.planStatus === "active") {
+        // 🔥 Verifica se o plano ainda está no prazo antes de rebaixar
+        const now = new Date();
+        const expiresAt = user.planExpiresAt?.toDate?.() ?? null;
+        const hasActivePlan = expiresAt && now < expiresAt;
+
+        if (hasActivePlan) {
+          // Mantém ativo, só limpa a subscriptionId (já foi cancelada)
+          await updateUserByCustomerId(subscription.customer, {
+            subscriptionId: null,
+            nextPlanId: null,
+          });
+          console.log("🟡 Assinatura deletada mas plano ainda válido, mantendo:", user.id);
+        } else {
           await downgradeToBasic(subscription.customer);
           await sendPush(
             user.fcmToken,
