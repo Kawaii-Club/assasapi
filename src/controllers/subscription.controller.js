@@ -139,10 +139,24 @@ export async function cancelPendingPayment(req, res) {
       await deleteSubscriptionAsaas(user.subscriptionId);
     }
 
+    // 🔥 Verifica se ainda tem plano ativo e não expirado
+    const now = new Date();
+    const expiresAt = user.planExpiresAt?.toDate?.() ?? null;
+    const hasActivePlan = expiresAt && now < expiresAt;
+
     await updateUser(userId, {
       subscriptionId: null,
       nextPlanId: null,
-      planStatus: "inactive",
+      // Mantém "active" se o plano ainda está no prazo, senão volta para básico
+      ...(hasActivePlan
+        ? { planStatus: "active" }
+        : {
+            planStatus: "active",   // nobreza também é "active"
+            planId: "nobreza",
+            planStartedAt: null,
+            planExpiresAt: null,
+          }
+      ),
     });
 
     return res.json({ success: true });
@@ -152,7 +166,6 @@ export async function cancelPendingPayment(req, res) {
     return res.status(500).json({ error: "Erro ao cancelar pendente" });
   }
 }
-
 // ===============================
 // CANCELAR ASSINATURA
 // ===============================
