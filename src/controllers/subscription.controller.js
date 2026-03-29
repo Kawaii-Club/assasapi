@@ -139,19 +139,17 @@ export async function cancelPendingPayment(req, res) {
       await deleteSubscriptionAsaas(user.subscriptionId);
     }
 
-    // 🔥 Verifica se ainda tem plano ativo e não expirado
     const now = new Date();
     const expiresAt = user.planExpiresAt?.toDate?.() ?? null;
     const hasActivePlan = expiresAt && now < expiresAt;
 
     await updateUser(userId, {
       subscriptionId: null,
-      nextPlanId: null,
-      // Mantém "active" se o plano ainda está no prazo, senão volta para básico
+      nextPlanId: null,         // 🔥 limpa o nextPlanId sempre
       ...(hasActivePlan
         ? { planStatus: "active" }
         : {
-            planStatus: "active",   // nobreza também é "active"
+            planStatus: "active",
             planId: "nobreza",
             planStartedAt: null,
             planExpiresAt: null,
