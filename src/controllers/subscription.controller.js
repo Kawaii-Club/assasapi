@@ -100,7 +100,7 @@ export async function createSubscriptionController(req, res) {
       billingType,
       value,
       cycle,
-      nextDueDate: todayPlus(3),   // 🔥 fatura vence em 3 dias, ciclo do plano é controlado pelo "cycle"
+      nextDueDate: todayPlus(1),   // 🔥 fatura vence em 3 dias, ciclo do plano é controlado pelo "cycle"
       description: planId,
     });
 
