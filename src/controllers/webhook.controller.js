@@ -197,7 +197,7 @@ export async function asaasWebhook(req, res) {
       await updateUserByCustomerId(customerId, {
         planId: newPlan,
         nextPlanId: null,
-        planStatus: "active", // 🔥 ESSENCIAL
+        planStatus: "active",
         subscriptionId: payment.subscription || user.subscriptionId,
         billingCycle: user.billingCycle || "monthly",
         planStartedAt: startedAt,

@@ -12,14 +12,13 @@ import { todayPlus } from "../utils/date.js";
 const db = admin.firestore();
 
 // ===============================
-// HELPER
+// HELPER — busca pagamento gerado
 // ===============================
 async function getPendingPayment(subscriptionId) {
   for (let i = 0; i < 5; i++) {
     await new Promise(r => setTimeout(r, 2000));
 
     const payments = await getSubscriptionPayments(subscriptionId);
-
     const payment =
       payments?.data?.find(p => p.status === "PENDING") ||
       payments?.data?.[0];
@@ -50,7 +49,7 @@ export async function createSubscriptionController(req, res) {
     const user = await getUser(userId);
     if (!user) return res.status(404).json({ error: "Usuário não encontrado" });
 
-    // CUSTOMER
+    // Garante customer no Asaas
     if (!user.customerId) {
       const customer = await createCustomer({
         name: user.name,
@@ -63,7 +62,7 @@ export async function createSubscriptionController(req, res) {
       user.customerId = customer.id;
     }
 
-    // UPGRADE
+    // Upgrade — atualiza assinatura existente
     if (user.subscriptionId && user.planStatus === "active") {
       try {
         const updated = await updateSubscriptionAsaas(user.subscriptionId, {
@@ -72,8 +71,7 @@ export async function createSubscriptionController(req, res) {
           billingType,
           nextDueDate: todayPlus(0),
           updatePendingPayments: true,
-            description: planId,                  // 🔥 nome do plano
-
+          description: planId,
         });
 
         const payment = await getPendingPayment(updated.id);
@@ -83,24 +81,20 @@ export async function createSubscriptionController(req, res) {
           nextPlanId: planId,
         });
 
-        return res.json({
-          success: true,
-          operation: "upgrade",
-          ...payment,
-        });
+        return res.json({ success: true, operation: "upgrade", ...payment });
 
       } catch {
-        user.subscriptionId = null;
+        user.subscriptionId = null; // fallback: cria nova
       }
     }
 
-    // CREATE
+    // Nova assinatura
     const subscription = await createSubscription({
       customer: user.customerId,
       billingType,
       value,
       cycle,
-      nextDueDate: todayPlus(1),   // 🔥 fatura vence em 3 dias, ciclo do plano é controlado pelo "cycle"
+      nextDueDate: todayPlus(1),
       description: planId,
     });
 
@@ -120,7 +114,7 @@ export async function createSubscriptionController(req, res) {
     });
 
   } catch (err) {
-    console.error(err);
+    console.error("❌ createSubscription:", err.message);
     return res.status(500).json({ error: "Erro interno" });
   }
 }
@@ -132,40 +126,63 @@ export async function cancelPendingPayment(req, res) {
   try {
     const { userId } = req.body;
 
+    if (!userId) {
+      return res.status(400).json({ error: "userId é obrigatório" });
+    }
+
     const user = await getUser(userId);
     if (!user) return res.status(404).json({ error: "Usuário não encontrado" });
 
+    // ✅ FIX: tenta deletar a assinatura no Asaas mas ignora 404.
+    // Se a assinatura já não existe lá (expirou, foi cancelada manualmente,
+    // ou nunca foi criada), simplesmente segue e limpa o Firestore.
     if (user.subscriptionId) {
-      await deleteSubscriptionAsaas(user.subscriptionId);
+      try {
+        await deleteSubscriptionAsaas(user.subscriptionId);
+        console.log("🗑️ Assinatura deletada no Asaas:", user.subscriptionId);
+      } catch (err) {
+        const status = err?.response?.status ?? err?.status;
+
+        if (status === 404) {
+          // Assinatura já não existe no Asaas — sem problema, só limpa o Firestore
+          console.warn("⚠️ Assinatura não encontrada no Asaas (404), seguindo:", user.subscriptionId);
+        } else {
+          // Erro real — retorna 500 para o Flutter tratar
+          console.error("❌ Erro ao deletar assinatura no Asaas:", err?.response?.data || err.message);
+          return res.status(500).json({ error: "Erro ao cancelar assinatura no Asaas" });
+        }
+      }
     }
 
+    // Limpa o Firestore — verifica se ainda tem plano ativo para não regredir
     const now = new Date();
     const expiresAt = user.planExpiresAt?.toDate?.() ?? null;
-    const hasActivePlan = expiresAt && now < expiresAt;
+    const hasActivePlan = expiresAt && now < expiresAt && user.planId && user.planId !== "nobreza";
 
     await updateUser(userId, {
       subscriptionId: null,
-      nextPlanId: null,         // 🔥 limpa o nextPlanId sempre
-      ...(hasActivePlan
-        ? { planStatus: "active" }
-        : {
-            planStatus: "active",
-            planId: "nobreza",
-            planStartedAt: null,
-            planExpiresAt: null,
-          }
-      ),
+      nextPlanId: null,
+      planStatus: hasActivePlan ? "active" : "inactive",
+      // Se não tem plano ativo, volta para nobreza
+      ...(!hasActivePlan && {
+        planId: "nobreza",
+        planStartedAt: null,
+        planExpiresAt: null,
+      }),
     });
+
+    console.log("🧹 Pendência cancelada para:", userId, "| planStatus →", hasActivePlan ? "active" : "inactive");
 
     return res.json({ success: true });
 
   } catch (err) {
-    console.error(err);
+    console.error("❌ cancelPendingPayment:", err.message);
     return res.status(500).json({ error: "Erro ao cancelar pendente" });
   }
 }
+
 // ===============================
-// CANCELAR ASSINATURA
+// CANCELAR ASSINATURA DEFINITIVAMENTE
 // ===============================
 export async function cancelSubscription(req, res) {
   try {
@@ -175,7 +192,18 @@ export async function cancelSubscription(req, res) {
       return res.status(400).json({ error: "subscriptionId obrigatório" });
     }
 
-    await deleteSubscriptionAsaas(subscriptionId);
+    // ✅ Mesma proteção: ignora 404 no Asaas
+    try {
+      await deleteSubscriptionAsaas(subscriptionId);
+      console.log("🛑 Assinatura cancelada no Asaas:", subscriptionId);
+    } catch (err) {
+      const status = err?.response?.status ?? err?.status;
+      if (status !== 404) {
+        console.error("❌ Erro ao cancelar no Asaas:", err?.response?.data || err.message);
+        return res.status(500).json({ error: "Erro ao cancelar assinatura no Asaas" });
+      }
+      console.warn("⚠️ Assinatura já não existia no Asaas:", subscriptionId);
+    }
 
     const users = await db
       .collection("users")
@@ -190,10 +218,11 @@ export async function cancelSubscription(req, res) {
       });
     }
 
+    console.log("✅ Assinatura cancelada:", subscriptionId);
     return res.json({ success: true });
 
   } catch (err) {
-    console.error(err);
+    console.error("❌ cancelSubscription:", err.message);
     return res.status(500).json({ error: "Erro ao cancelar assinatura" });
   }
 }
