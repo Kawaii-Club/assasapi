@@ -33,7 +33,21 @@ async function downgradeToBasic(customerId) {
   });
   console.log("👑 Usuário voltou para Nobreza:", customerId);
 }
+async function revertToPreviousPlan(user) {
+  const fallbackPlan = user.previousPlanId || "nobreza";
 
+  await updateUserByCustomerId(user.customerId, {
+    planId: fallbackPlan,
+    nextPlanId: null,
+    planStatus: "active",
+    subscriptionId: null,
+    planStartedAt: null,
+    planExpiresAt: null,
+    previousPlanId: null,
+  });
+
+  console.log("↩️ Revertido para plano anterior:", fallbackPlan);
+}
 function calcExpiresAt(startedAt, billingCycle) {
   const d = new Date(startedAt);
   const cycle = (billingCycle ?? "monthly").toLowerCase().trim();
@@ -195,6 +209,8 @@ export async function asaasWebhook(req, res) {
       const expiresAt = calcExpiresAt(startedAt, user.billingCycle || "monthly");
 
       await updateUserByCustomerId(customerId, {
+          previousPlanId: user.planId, // 👈 salva antes de trocar
+
         planId: newPlan,
         nextPlanId: null,
         planStatus: "active",
@@ -208,6 +224,39 @@ export async function asaasWebhook(req, res) {
 
       console.log("✅ Plano ATIVADO:", newPlan);
     }
+
+    // =========================================================
+// PAYMENT_REFUNDED (EXTORNO)
+// =========================================================
+
+if (event === "PAYMENT_REFUNDED") {
+  console.log("💸 PAGAMENTO ESTORNADO:", payment.id);
+
+  // Atualiza order
+  await orderRef.set({
+    status: "refunded",
+    refundedAt: new Date(),
+    updatedAt: new Date(),
+  }, { merge: true });
+
+  // 🔥 Só faz downgrade se esse pagamento foi o que ativou o plano
+  const isLastPayment = user.lastPaymentId === payment.id;
+
+  if (isLastPayment) {
+  await revertToPreviousPlan(user);
+
+    await sendPush(
+      user.fcmToken,
+      "Pagamento estornado",
+      "Seu pagamento foi estornado e seu plano voltou para o básico.",
+      { type: "payment_refunded" }
+    );
+
+    console.log("🔻 Plano revertido por refund:", user.id);
+  } else {
+    console.log("🟡 Refund ignorado (não é o último pagamento ativo)");
+  }
+}
 
     // =========================================================
     // PAYMENT_DELETED (FIX IMPORTANTE)
