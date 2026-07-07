@@ -1,7 +1,5 @@
 import { updateUserByCustomerId, getUserByCustomerId } from "../services/user.service.js";
-import admin from "firebase-admin";
-
-const db = admin.firestore();
+import admin, { db, messaging } from "../firebase/firebaseAdmin.js";
 
 const PLAN_ORDER = { nobreza: 0, alteza: 1, majestade: 2 };
 
@@ -12,7 +10,7 @@ function planRank(planId) {
 async function sendPush(fcmToken, title, body, data = {}) {
   if (!fcmToken) return;
   try {
-    await admin.messaging().send({
+    await messaging.send({
       token: fcmToken,
       notification: { title, body },
       data,
@@ -293,7 +291,13 @@ if (event === "PAYMENT_REFUNDED") {
     return res.status(200).json({ received: true });
 
   } catch (err) {
-    console.error("❌ WEBHOOK ERROR:", err.message);
-    return res.status(500).json({ error: "Webhook error" });
-  }
+  console.error("❌ WEBHOOK ERROR:");
+  console.error(err);
+  console.error(err.stack);
+
+  return res.status(500).json({
+    error: err.message,
+    stack: err.stack,
+  });
+}
 }

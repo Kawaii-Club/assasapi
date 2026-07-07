@@ -1,7 +1,7 @@
-import { admin } from '../firebase/firebaseAdmin.js';
+import admin, { db, messaging } from '../firebase/firebaseAdmin.js';
 
 export async function sendPush({ toUserId, title, body, data }) {
-  const userSnap = await admin.firestore()
+  const userSnap = await db
     .collection('users')
     .doc(toUserId)
     .get();
@@ -9,7 +9,7 @@ export async function sendPush({ toUserId, title, body, data }) {
   const token = userSnap.data()?.fcmToken;
   if (!token) return;
 
-  await admin.messaging().send({
+  await messaging.send({
     token,
     notification: { title, body },
     data: data ?? {},

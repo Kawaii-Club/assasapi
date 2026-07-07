@@ -1,6 +1,4 @@
-import admin from "firebase-admin";
-
-const db = admin.firestore();
+import admin, { db, messaging } from "../firebase/firebaseAdmin.js";
 
 export async function checkExpiringSubscriptions(req, res) {
   const { userId } = req.params;

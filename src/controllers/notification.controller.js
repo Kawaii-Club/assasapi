@@ -1,10 +1,10 @@
-import admin from '../firebase/firebaseAdmin.js';
+import admin, { messaging } from '../firebase/firebaseAdmin.js';
 
 export const sendNotification = async (req, res) => {
   try {
     const { token, title, body, data } = req.body;
 
-    await admin.messaging().send({
+    await messaging.send({
       token,
       notification: { title, body },
       data,

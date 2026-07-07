@@ -1,7 +1,5 @@
 import axios from "axios";
-import admin from "firebase-admin";
-
-const db = admin.firestore();
+import admin, { db, messaging } from "../firebase/firebaseAdmin.js";
 
 export async function cancelSubscription(req, res) {
   try {

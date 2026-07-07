@@ -1,4 +1,4 @@
-import admin from "firebase-admin";
+import admin, { db, messaging } from "../firebase/firebaseAdmin.js";
 import { getUser, updateUser } from "../services/user.service.js";
 import {
   createSubscription,
@@ -8,8 +8,6 @@ import {
   getSubscriptionPayments,
 } from "../services/asaas.service.js";
 import { todayPlus } from "../utils/date.js";
-
-const db = admin.firestore();
 
 // ===============================
 // HELPER — busca pagamento gerado
@@ -49,6 +47,21 @@ export async function createSubscriptionController(req, res) {
     const user = await getUser(userId);
     if (!user) return res.status(404).json({ error: "Usuário não encontrado" });
 
+    const plansSnapshot = await db
+      .collection("plans")
+      .where("name", "==", planId)
+      .limit(1)
+      .get();
+
+    if (plansSnapshot.empty) {
+      return res.status(404).json({
+        error: "Plano não encontrado",
+      });
+    }
+
+    const planDoc = plansSnapshot.docs[0];
+    const plan = planDoc.data();
+
     // Garante customer no Asaas
     if (!user.customerId) {
       const customer = await createCustomer({
@@ -78,7 +91,7 @@ export async function createSubscriptionController(req, res) {
 
         await updateUser(userId, {
           subscriptionId: updated.id,
-          nextPlanId: planId,
+          nextPlanId: plan.name,
         });
 
         return res.json({ success: true, operation: "upgrade", ...payment });
@@ -103,7 +116,7 @@ export async function createSubscriptionController(req, res) {
     await updateUser(userId, {
       subscriptionId: subscription.id,
       planStatus: "pending_payment",
-      nextPlanId: planId,
+      nextPlanId: plan.name,
     });
 
     return res.json({
