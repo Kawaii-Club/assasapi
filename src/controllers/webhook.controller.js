@@ -1,4 +1,4 @@
-import { updateUserByCustomerId, getUserByCustomerId } from "../services/user.service.js";
+import { getUser, updateUser } from "../services/user.service.js";
 import admin, { db, messaging } from "../firebase/firebaseAdmin.js";
 
 const PLAN_ORDER = { nobreza: 0, alteza: 1, majestade: 2 };
@@ -20,8 +20,8 @@ async function sendPush(fcmToken, title, body, data = {}) {
   }
 }
 
-async function downgradeToBasic(customerId) {
-  await updateUserByCustomerId(customerId, {
+async function downgradeToBasic(userId) {
+  await updateUser(userId, {
     planId: "nobreza",
     nextPlanId: null,
     planStatus: "active",
@@ -29,12 +29,12 @@ async function downgradeToBasic(customerId) {
     planStartedAt: null,
     planExpiresAt: null,
   });
-  console.log("👑 Usuário voltou para Nobreza:", customerId);
+  console.log("👑 Usuário voltou para Nobreza:", userId);
 }
 async function revertToPreviousPlan(user) {
   const fallbackPlan = user.previousPlanId || "nobreza";
 
-  await updateUserByCustomerId(user.customerId, {
+  await updateUser(user.id, {
     planId: fallbackPlan,
     nextPlanId: null,
     planStatus: "active",
@@ -67,7 +67,22 @@ export async function asaasWebhook(req, res) {
 
     const { event, payment, subscription } = req.body;
 
-    console.log("🔥 EVENTO:", event);
+    console.log("========================================");
+    console.log("EVENT:", event);
+    console.log("PAYMENT:", payment?.id);
+    console.log("STATUS:", payment?.status);
+    console.log("CUSTOMER:", payment?.customer);
+    console.log("EXTERNAL REFERENCE:", payment?.externalReference);
+    console.log("SUBSCRIPTION:", payment?.subscription);
+    console.log("========================================");
+
+    console.log("========================================");
+    console.log("EVENT:", event);
+    console.log("SUB:", subscription?.id);
+    console.log("STATUS:", subscription?.status);
+    console.log("CUSTOMER:", subscription?.customer);
+    console.log("EXTERNAL REFERENCE:", subscription?.externalReference);
+    console.log("========================================");
 
     // =========================================================
     // SUBSCRIPTION EVENTS
@@ -79,8 +94,13 @@ export async function asaasWebhook(req, res) {
         return res.status(200).json({ ignored: true });
       }
 
-      const user = await getUserByCustomerId(subscription.customer);
-      if (!user) return res.status(200).json({ ignored: true });
+      const userId = subscription.externalReference;
+      const user = await getUser(userId);
+
+      if (!user) {
+        console.log("❌ Usuário não encontrado:", userId);
+        return res.status(200).json({ ignored: true });
+      }
 
       await db.collection("subscriptions").doc(subscription.id).set({
         userId: user.id,
@@ -96,7 +116,7 @@ export async function asaasWebhook(req, res) {
       }, { merge: true });
 
       if (event === "SUBSCRIPTION_CREATED") {
-        await updateUserByCustomerId(subscription.customer, {
+        await updateUser(user.id, {
           subscriptionId: subscription.id,
           planStatus: user.planStatus === "active" ? "active" : "pending_payment",
           subscriptionCreatedAt: new Date(),
@@ -111,13 +131,13 @@ export async function asaasWebhook(req, res) {
 
         if (hasActivePlan) {
           // Mantém ativo, só limpa a subscriptionId (já foi cancelada)
-          await updateUserByCustomerId(subscription.customer, {
+          await updateUser(user.id, {
             subscriptionId: null,
             nextPlanId: null,
           });
           console.log("🟡 Assinatura deletada mas plano ainda válido, mantendo:", user.id);
         } else {
-          await downgradeToBasic(subscription.customer);
+          await downgradeToBasic(user.id);
           await sendPush(
             user.fcmToken,
             "Assinatura encerrada",
@@ -138,9 +158,13 @@ export async function asaasWebhook(req, res) {
       return res.status(200).json({ ignored: true });
     }
 
-    const customerId = payment.customer;
-    const user = await getUserByCustomerId(customerId);
-    if (!user) return res.status(200).json({ ignored: true });
+    const userId = payment.externalReference;
+    const user = await getUser(userId);
+
+    if (!user) {
+      console.log("❌ Usuário não encontrado:", userId);
+      return res.status(200).json({ ignored: true });
+    }
 
     // 🔥 SALVA ORDER (sempre)
     const orderRef = db.collection("orders").doc(payment.id);
@@ -178,7 +202,7 @@ export async function asaasWebhook(req, res) {
         return res.status(200).json({ ignored: true });
       }
 
-      await updateUserByCustomerId(customerId, {
+      await updateUser(user.id, {
         planStatus: "pending_payment",
       });
 
@@ -194,7 +218,21 @@ export async function asaasWebhook(req, res) {
 
       // Re-busca o usuário no momento do processamento para evitar
       // condições de corrida entre a criação da assinatura e o webhook.
-      const freshUser = await getUserByCustomerId(customerId);
+      const freshUser = await getUser(user.id);
+
+      if (!freshUser) {
+        console.error("Usuário não encontrado durante PAYMENT_RECEIVED");
+        return res.status(200).json({ ignored: true });
+      }
+
+      console.log("========== ATIVAÇÃO ==========");
+      console.log("USER:", freshUser.id);
+      console.log("CURRENT PLAN:", freshUser.planId);
+      console.log("NEXT PLAN:", freshUser.nextPlanId);
+      console.log("CURRENT STATUS:", freshUser.planStatus);
+      console.log("LAST PAYMENT:", freshUser.lastPaymentId);
+      console.log("PAYMENT:", payment.id);
+      console.log("==============================");
 
       // 🔥 FIX: só bloqueia duplicado se já estiver ACTIVE
       if (freshUser.lastPaymentId === payment.id && freshUser.planStatus === "active") {
@@ -210,7 +248,7 @@ export async function asaasWebhook(req, res) {
 
       const expiresAt = calcExpiresAt(startedAt, freshUser.billingCycle || "monthly");
 
-      await updateUserByCustomerId(customerId, {
+      const updatedUser = await updateUser(user.id, {
         previousPlanId: freshUser.planId, // 👈 salva antes de trocar
 
         planId: newPlan,
@@ -224,6 +262,9 @@ export async function asaasWebhook(req, res) {
         lastPaymentId: payment.id,
       });
 
+      console.log("========== USER UPDATED ==========");
+      console.log(updatedUser);
+      console.log("==================================");
       console.log("✅ Plano ATIVADO:", newPlan);
     }
 
@@ -276,7 +317,7 @@ if (event === "PAYMENT_REFUNDED") {
       }
 
       // 🔥 Sem plano ativo → volta para o básico
-      await downgradeToBasic(customerId);
+      await downgradeToBasic(user.id);
       console.log("🗑️ Pendência limpa, voltou para Nobreza:", payment.id);
     }
     // =========================================================

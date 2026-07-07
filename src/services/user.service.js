@@ -7,7 +7,16 @@ export async function getUser(userId) {
 }
 
 export async function updateUser(userId, data) {
-  await db.collection("users").doc(userId).update(data);
+  const ref = db.collection("users").doc(userId);
+
+  await ref.update(data);
+
+  const doc = await ref.get();
+
+  return {
+    id: doc.id,
+    ...doc.data(),
+  };
 }
 export async function updateUserByCustomerId(customerId, data) {
   const snapshot = await db
