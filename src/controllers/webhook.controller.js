@@ -284,8 +284,19 @@ if (event === "PAYMENT_REFUNDED") {
     // =========================================================
 
     if (event === "PAYMENT_OVERDUE") {
-      await downgradeToBasic(customerId);
-      console.log("⛔ Plano rebaixado:", user.id);
+      await orderRef.set({
+        status: "overdue",
+        updatedAt: new Date(),
+      }, { merge: true });
+
+      console.log(
+        "⚠️ Pagamento vencido:",
+        payment.id,
+        "- Plano permanece ativo até",
+        user.planExpiresAt
+      );
+
+      return res.status(200).json({ received: true });
     }
 
     return res.status(200).json({ received: true });
