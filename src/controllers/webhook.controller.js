@@ -194,28 +194,32 @@ export async function asaasWebhook(req, res) {
 
       console.log("💰 PAGAMENTO CONFIRMADO:", payment.id);
 
+      // Re-busca o usuário no momento do processamento para evitar
+      // condições de corrida entre a criação da assinatura e o webhook.
+      const freshUser = await getUserByCustomerId(customerId);
+
       // 🔥 FIX: só bloqueia duplicado se já estiver ACTIVE
-      if (user.lastPaymentId === payment.id && user.planStatus === "active") {
+      if (freshUser.lastPaymentId === payment.id && freshUser.planStatus === "active") {
         console.log("🔁 Já processado corretamente:", payment.id);
         return res.status(200).json({ ignored: true });
       }
 
-      const newPlan = user?.nextPlanId ?? user?.planId;
+      const newPlan = freshUser?.nextPlanId ?? freshUser?.planId;
 
       const startedAt = payment.paymentDate
         ? new Date(payment.paymentDate)
         : new Date();
 
-      const expiresAt = calcExpiresAt(startedAt, user.billingCycle || "monthly");
+      const expiresAt = calcExpiresAt(startedAt, freshUser.billingCycle || "monthly");
 
       await updateUserByCustomerId(customerId, {
-          previousPlanId: user.planId, // 👈 salva antes de trocar
+        previousPlanId: freshUser.planId, // 👈 salva antes de trocar
 
         planId: newPlan,
         nextPlanId: null,
         planStatus: "active",
-        subscriptionId: payment.subscription || user.subscriptionId,
-        billingCycle: user.billingCycle || "monthly",
+        subscriptionId: payment.subscription || freshUser.subscriptionId,
+        billingCycle: freshUser.billingCycle || "monthly",
         planStartedAt: startedAt,
         planExpiresAt: expiresAt,
         lastPaymentAt: startedAt,
